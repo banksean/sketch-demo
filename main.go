@@ -52,11 +52,19 @@ func greet(w io.Writer, config *Config) {
 	}
 }
 
+// webModeFunc is a function pointer that can be set by web builds
+var webModeFunc func()
+
 func main() {
 	config := parseFlags()
 
 	if config.WebMode {
-		fmt.Println("Web mode requires running with: go run web_server.go main.go --web")
+		if webModeFunc != nil {
+			webModeFunc()
+			return
+		}
+		fmt.Println("Web mode not available in CLI-only build.")
+		fmt.Println("To use web mode, run: go build -o hello-web web_server.go main.go && ./hello-web --web")
 		os.Exit(1)
 	}
 

@@ -421,3 +421,8 @@ func startWebServer() {
 
 	log.Fatal(http.ListenAndServe(port, nil))
 }
+
+// init sets the web mode function pointer when this package is included
+func init() {
+	webModeFunc = startWebServer
+}
