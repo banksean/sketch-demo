@@ -11,6 +11,7 @@ import (
 type Config struct {
 	Name    string
 	Verbose bool
+	WebMode bool
 }
 
 // parseFlags parses command line flags and returns a Config
@@ -18,6 +19,7 @@ func parseFlags() *Config {
 	var config Config
 	flag.StringVar(&config.Name, "name", "World", "Name to greet")
 	flag.BoolVar(&config.Verbose, "verbose", false, "Enable verbose output")
+	flag.BoolVar(&config.WebMode, "web", false, "Start web server mode")
 	flag.Parse()
 	return &config
 }
@@ -52,6 +54,12 @@ func greet(w io.Writer, config *Config) {
 
 func main() {
 	config := parseFlags()
+
+	if config.WebMode {
+		fmt.Println("Web mode requires running with: go run web_server.go main.go --web")
+		os.Exit(1)
+	}
+
 	greet(os.Stdout, config)
 	os.Exit(0)
 }
