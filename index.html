@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Guitar Chord Progressions</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app">
+        <header>
+            <h1>🎸 Chord Progressions</h1>
+            <p>Build and explore guitar chord relationships</p>
+        </header>
+
+        <main>
+            <section class="chord-selector">
+                <h2>Available Chords</h2>
+                <div class="chord-grid" id="chordGrid">
+                    <!-- Chords will be populated by JavaScript -->
+                </div>
+            </section>
+
+            <section class="progression-builder">
+                <h2>Your Progression</h2>
+                <div class="progression-display">
+                    <div class="progression-chords" id="progressionChords">
+                        <div class="empty-progression">Click chords above to build your progression</div>
+                    </div>
+                    <div class="progression-controls">
+                        <button id="playProgression" class="btn-play" disabled>▶ Play</button>
+                        <button id="clearProgression" class="btn-clear">Clear</button>
+                        <button id="saveProgression" class="btn-save">📓 Save</button>
+                    </div>
+                </div>
+            </section>
+
+            <section class="chord-display">
+                <h2>Current Chord</h2>
+                <div class="chord-diagram" id="chordDiagram">
+                    <div class="no-chord">Select a chord to see diagram</div>
+                </div>
+                <div class="chord-info" id="chordInfo">
+                    <!-- Chord theory info will appear here -->
+                </div>
+            </section>
+
+            <section class="saved-progressions">
+                <h2>📓 Saved Progressions</h2>
+                <div class="progression-list" id="savedProgressions">
+                    <div class="no-progressions">No saved progressions yet</div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="chords.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
