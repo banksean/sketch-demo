@@ -1,0 +1,503 @@
+-- SQL Examples and Database Scripts
+
+-- Database Schema Creation
+CREATE DATABASE IF NOT EXISTS company_db;
+USE company_db;
+
+-- Users table
+CREATE TABLE users (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    username VARCHAR(50) UNIQUE NOT NULL,
+    email VARCHAR(100) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    first_name VARCHAR(50) NOT NULL,
+    last_name VARCHAR(50) NOT NULL,
+    date_of_birth DATE,
+    phone VARCHAR(20),
+    address TEXT,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_username (username),
+    INDEX idx_email (email),
+    INDEX idx_created_at (created_at)
+);
+
+-- Departments table
+CREATE TABLE departments (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    name VARCHAR(100) UNIQUE NOT NULL,
+    description TEXT,
+    manager_id INT,
+    budget DECIMAL(12, 2),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_name (name),
+    INDEX idx_manager_id (manager_id)
+);
+
+-- Employees table
+CREATE TABLE employees (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT NOT NULL,
+    employee_id VARCHAR(20) UNIQUE NOT NULL,
+    department_id INT NOT NULL,
+    position VARCHAR(100) NOT NULL,
+    salary DECIMAL(10, 2) NOT NULL,
+    hire_date DATE NOT NULL,
+    manager_id INT,
+    status ENUM('active', 'inactive', 'terminated') DEFAULT 'active',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE RESTRICT,
+    FOREIGN KEY (manager_id) REFERENCES employees(id) ON DELETE SET NULL,
+    INDEX idx_employee_id (employee_id),
+    INDEX idx_department_id (department_id),
+    INDEX idx_hire_date (hire_date),
+    INDEX idx_status (status)
+);
+
+-- Add foreign key constraint for department manager
+ALTER TABLE departments 
+ADD CONSTRAINT fk_department_manager 
+FOREIGN KEY (manager_id) REFERENCES employees(id) ON DELETE SET NULL;
+
+-- Projects table
+CREATE TABLE projects (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    name VARCHAR(200) NOT NULL,
+    description TEXT,
+    start_date DATE NOT NULL,
+    end_date DATE,
+    budget DECIMAL(12, 2),
+    status ENUM('planning', 'active', 'completed', 'cancelled') DEFAULT 'planning',
+    priority ENUM('low', 'medium', 'high', 'critical') DEFAULT 'medium',
+    department_id INT NOT NULL,
+    project_manager_id INT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE RESTRICT,
+    FOREIGN KEY (project_manager_id) REFERENCES employees(id) ON DELETE SET NULL,
+    INDEX idx_name (name),
+    INDEX idx_status (status),
+    INDEX idx_start_date (start_date),
+    INDEX idx_end_date (end_date)
+);
+
+-- Project assignments table (many-to-many)
+CREATE TABLE project_assignments (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    project_id INT NOT NULL,
+    employee_id INT NOT NULL,
+    role VARCHAR(100) NOT NULL,
+    allocation_percentage DECIMAL(5, 2) DEFAULT 100.00,
+    start_date DATE NOT NULL,
+    end_date DATE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_assignment (project_id, employee_id),
+    INDEX idx_project_id (project_id),
+    INDEX idx_employee_id (employee_id)
+);
+
+-- Attendance table
+CREATE TABLE attendance (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    employee_id INT NOT NULL,
+    date DATE NOT NULL,
+    time_in TIME,
+    time_out TIME,
+    break_duration INT DEFAULT 0, -- in minutes
+    total_hours DECIMAL(4, 2),
+    status ENUM('present', 'absent', 'late', 'half_day', 'holiday') DEFAULT 'present',
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_attendance (employee_id, date),
+    INDEX idx_employee_id (employee_id),
+    INDEX idx_date (date),
+    INDEX idx_status (status)
+);
+
+-- Salary history table
+CREATE TABLE salary_history (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    employee_id INT NOT NULL,
+    old_salary DECIMAL(10, 2),
+    new_salary DECIMAL(10, 2) NOT NULL,
+    effective_date DATE NOT NULL,
+    reason VARCHAR(255),
+    approved_by INT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
+    FOREIGN KEY (approved_by) REFERENCES employees(id) ON DELETE SET NULL,
+    INDEX idx_employee_id (employee_id),
+    INDEX idx_effective_date (effective_date)
+);
+
+-- Insert sample data
+INSERT INTO users (username, email, password_hash, first_name, last_name, date_of_birth, phone, address) VALUES
+('john_doe', 'john.doe@company.com', 'hashed_password_1', 'John', 'Doe', '1985-03-15', '+1-555-0101', '123 Main St, City, State 12345'),
+('jane_smith', 'jane.smith@company.com', 'hashed_password_2', 'Jane', 'Smith', '1990-07-22', '+1-555-0102', '456 Oak Ave, City, State 12346'),
+('bob_johnson', 'bob.johnson@company.com', 'hashed_password_3', 'Bob', 'Johnson', '1982-11-08', '+1-555-0103', '789 Pine Rd, City, State 12347'),
+('alice_brown', 'alice.brown@company.com', 'hashed_password_4', 'Alice', 'Brown', '1988-05-12', '+1-555-0104', '321 Elm St, City, State 12348'),
+('charlie_wilson', 'charlie.wilson@company.com', 'hashed_password_5', 'Charlie', 'Wilson', '1983-09-30', '+1-555-0105', '654 Maple Dr, City, State 12349'),
+('diana_davis', 'diana.davis@company.com', 'hashed_password_6', 'Diana', 'Davis', '1992-02-18', '+1-555-0106', '987 Cedar Ln, City, State 12350'),
+('edward_miller', 'edward.miller@company.com', 'hashed_password_7', 'Edward', 'Miller', '1986-12-05', '+1-555-0107', '159 Birch Way, City, State 12351'),
+('frank_garcia', 'frank.garcia@company.com', 'hashed_password_8', 'Frank', 'Garcia', '1991-04-25', '+1-555-0108', '753 Spruce St, City, State 12352');
+
+INSERT INTO departments (name, description, budget) VALUES
+('Engineering', 'Software development and technical operations', 500000.00),
+('Marketing', 'Brand management and customer acquisition', 300000.00),
+('Sales', 'Revenue generation and customer relations', 250000.00),
+('Human Resources', 'Employee management and organizational development', 150000.00),
+('Finance', 'Financial planning and accounting', 200000.00);
+
+INSERT INTO employees (user_id, employee_id, department_id, position, salary, hire_date, manager_id) VALUES
+(1, 'EMP001', 1, 'Senior Software Engineer', 95000.00, '2020-01-15', NULL),
+(2, 'EMP002', 1, 'Software Engineer', 75000.00, '2021-03-22', 1),
+(3, 'EMP003', 2, 'Marketing Manager', 80000.00, '2019-11-08', NULL),
+(4, 'EMP004', 2, 'Marketing Specialist', 55000.00, '2022-01-10', 3),
+(5, 'EMP005', 3, 'Sales Director', 120000.00, '2018-09-15', NULL),
+(6, 'EMP006', 3, 'Sales Representative', 50000.00, '2022-06-01', 5),
+(7, 'EMP007', 4, 'HR Manager', 70000.00, '2020-05-12', NULL),
+(8, 'EMP008', 5, 'Financial Analyst', 65000.00, '2021-08-25', NULL);
+
+-- Update department managers
+UPDATE departments SET manager_id = 1 WHERE id = 1;
+UPDATE departments SET manager_id = 3 WHERE id = 2;
+UPDATE departments SET manager_id = 5 WHERE id = 3;
+UPDATE departments SET manager_id = 7 WHERE id = 4;
+UPDATE departments SET manager_id = 8 WHERE id = 5;
+
+INSERT INTO projects (name, description, start_date, end_date, budget, status, priority, department_id, project_manager_id) VALUES
+('Website Redesign', 'Complete overhaul of company website', '2023-01-01', '2023-06-30', 50000.00, 'active', 'high', 1, 1),
+('Mobile App Development', 'New customer mobile application', '2023-03-01', '2023-12-31', 100000.00, 'active', 'critical', 1, 1),
+('Marketing Campaign Q2', 'Spring marketing campaign', '2023-04-01', '2023-06-30', 25000.00, 'planning', 'medium', 2, 3),
+('Sales Training Program', 'Comprehensive sales team training', '2023-02-01', '2023-04-30', 15000.00, 'completed', 'medium', 3, 5),
+('HR System Upgrade', 'Upgrade to new HR management system', '2023-05-01', '2023-08-31', 30000.00, 'planning', 'high', 4, 7);
+
+INSERT INTO project_assignments (project_id, employee_id, role, allocation_percentage, start_date, end_date) VALUES
+(1, 1, 'Project Lead', 75.00, '2023-01-01', '2023-06-30'),
+(1, 2, 'Developer', 100.00, '2023-01-15', '2023-06-30'),
+(2, 1, 'Technical Lead', 25.00, '2023-03-01', '2023-12-31'),
+(2, 2, 'Mobile Developer', 50.00, '2023-03-01', '2023-12-31'),
+(3, 3, 'Campaign Manager', 100.00, '2023-04-01', '2023-06-30'),
+(3, 4, 'Marketing Specialist', 75.00, '2023-04-01', '2023-06-30'),
+(4, 5, 'Training Coordinator', 50.00, '2023-02-01', '2023-04-30'),
+(4, 6, 'Participant', 25.00, '2023-02-01', '2023-04-30'),
+(5, 7, 'Project Manager', 100.00, '2023-05-01', '2023-08-31');
+
+-- Complex SQL Queries
+
+-- 1. Employee details with department and manager information
+SELECT 
+    e.employee_id,
+    CONCAT(u.first_name, ' ', u.last_name) AS employee_name,
+    e.position,
+    e.salary,
+    d.name AS department_name,
+    CONCAT(mu.first_name, ' ', mu.last_name) AS manager_name,
+    e.hire_date
+FROM employees e
+JOIN users u ON e.user_id = u.id
+JOIN departments d ON e.department_id = d.id
+LEFT JOIN employees m ON e.manager_id = m.id
+LEFT JOIN users mu ON m.user_id = mu.id
+WHERE e.status = 'active'
+ORDER BY d.name, e.hire_date;
+
+-- 2. Department statistics
+SELECT 
+    d.name AS department_name,
+    COUNT(e.id) AS employee_count,
+    AVG(e.salary) AS avg_salary,
+    MIN(e.salary) AS min_salary,
+    MAX(e.salary) AS max_salary,
+    SUM(e.salary) AS total_salary_cost,
+    d.budget,
+    (d.budget - SUM(e.salary)) AS remaining_budget
+FROM departments d
+LEFT JOIN employees e ON d.id = e.department_id AND e.status = 'active'
+GROUP BY d.id, d.name, d.budget
+ORDER BY employee_count DESC;
+
+-- 3. Project workload by employee
+SELECT 
+    e.employee_id,
+    CONCAT(u.first_name, ' ', u.last_name) AS employee_name,
+    COUNT(pa.id) AS project_count,
+    SUM(pa.allocation_percentage) AS total_allocation,
+    GROUP_CONCAT(p.name ORDER BY p.priority DESC SEPARATOR ', ') AS projects
+FROM employees e
+JOIN users u ON e.user_id = u.id
+JOIN project_assignments pa ON e.id = pa.employee_id
+JOIN projects p ON pa.project_id = p.id
+WHERE p.status IN ('active', 'planning')
+    AND (pa.end_date IS NULL OR pa.end_date >= CURDATE())
+GROUP BY e.id, e.employee_id, u.first_name, u.last_name
+HAVING total_allocation > 100
+ORDER BY total_allocation DESC;
+
+-- 4. Monthly attendance summary
+SELECT 
+    e.employee_id,
+    CONCAT(u.first_name, ' ', u.last_name) AS employee_name,
+    DATE_FORMAT(a.date, '%Y-%m') AS month,
+    COUNT(a.id) AS days_recorded,
+    SUM(CASE WHEN a.status = 'present' THEN 1 ELSE 0 END) AS days_present,
+    SUM(CASE WHEN a.status = 'absent' THEN 1 ELSE 0 END) AS days_absent,
+    SUM(CASE WHEN a.status = 'late' THEN 1 ELSE 0 END) AS days_late,
+    SUM(a.total_hours) AS total_hours_worked,
+    AVG(a.total_hours) AS avg_hours_per_day
+FROM employees e
+JOIN users u ON e.user_id = u.id
+JOIN attendance a ON e.id = a.employee_id
+WHERE a.date >= DATE_SUB(CURDATE(), INTERVAL 3 MONTH)
+GROUP BY e.id, e.employee_id, u.first_name, u.last_name, DATE_FORMAT(a.date, '%Y-%m')
+ORDER BY e.employee_id, month DESC;
+
+-- 5. Salary increase history
+SELECT 
+    e.employee_id,
+    CONCAT(u.first_name, ' ', u.last_name) AS employee_name,
+    sh.old_salary,
+    sh.new_salary,
+    (sh.new_salary - sh.old_salary) AS increase_amount,
+    ROUND(((sh.new_salary - sh.old_salary) / sh.old_salary) * 100, 2) AS increase_percentage,
+    sh.effective_date,
+    sh.reason,
+    CONCAT(au.first_name, ' ', au.last_name) AS approved_by
+FROM salary_history sh
+JOIN employees e ON sh.employee_id = e.id
+JOIN users u ON e.user_id = u.id
+LEFT JOIN employees ae ON sh.approved_by = ae.id
+LEFT JOIN users au ON ae.user_id = au.id
+WHERE sh.effective_date >= DATE_SUB(CURDATE(), INTERVAL 1 YEAR)
+ORDER BY sh.effective_date DESC;
+
+-- 6. Project budget vs actual allocation
+SELECT 
+    p.name AS project_name,
+    p.budget,
+    p.status,
+    p.priority,
+    COUNT(pa.id) AS team_size,
+    SUM(pa.allocation_percentage) / 100 AS total_fte,
+    AVG(e.salary) AS avg_team_salary,
+    (SUM(pa.allocation_percentage) / 100) * AVG(e.salary) AS estimated_monthly_cost,
+    DATEDIFF(COALESCE(p.end_date, CURDATE()), p.start_date) / 30 AS project_months,
+    ((SUM(pa.allocation_percentage) / 100) * AVG(e.salary)) * (DATEDIFF(COALESCE(p.end_date, CURDATE()), p.start_date) / 30) AS estimated_total_cost
+FROM projects p
+JOIN project_assignments pa ON p.id = pa.project_id
+JOIN employees e ON pa.employee_id = e.id
+GROUP BY p.id, p.name, p.budget, p.status, p.priority, p.start_date, p.end_date
+ORDER BY estimated_total_cost DESC;
+
+-- 7. Employee performance metrics (combining multiple factors)
+SELECT 
+    e.employee_id,
+    CONCAT(u.first_name, ' ', u.last_name) AS employee_name,
+    d.name AS department,
+    e.position,
+    TIMESTAMPDIFF(YEAR, e.hire_date, CURDATE()) AS years_with_company,
+    COUNT(DISTINCT pa.project_id) AS projects_involved,
+    AVG(a.total_hours) AS avg_daily_hours,
+    COUNT(CASE WHEN a.status = 'late' THEN 1 END) AS late_days_last_month,
+    COUNT(sh.id) AS salary_increases,
+    CASE 
+        WHEN COUNT(DISTINCT pa.project_id) > 3 AND AVG(a.total_hours) > 8 THEN 'High Performer'
+        WHEN COUNT(DISTINCT pa.project_id) > 1 AND AVG(a.total_hours) > 7 THEN 'Good Performer'
+        ELSE 'Needs Improvement'
+    END AS performance_rating
+FROM employees e
+JOIN users u ON e.user_id = u.id
+JOIN departments d ON e.department_id = d.id
+LEFT JOIN project_assignments pa ON e.id = pa.employee_id
+LEFT JOIN attendance a ON e.id = a.employee_id AND a.date >= DATE_SUB(CURDATE(), INTERVAL 1 MONTH)
+LEFT JOIN salary_history sh ON e.id = sh.employee_id
+WHERE e.status = 'active'
+GROUP BY e.id, e.employee_id, u.first_name, u.last_name, d.name, e.position, e.hire_date
+ORDER BY performance_rating DESC, years_with_company DESC;
+
+-- 8. Department workload and resource allocation
+SELECT 
+    d.name AS department_name,
+    COUNT(DISTINCT e.id) AS total_employees,
+    COUNT(DISTINCT p.id) AS active_projects,
+    AVG(e.salary) AS avg_department_salary,
+    SUM(e.salary) AS total_department_cost,
+    d.budget AS department_budget,
+    (d.budget - SUM(e.salary)) AS remaining_budget,
+    COUNT(DISTINCT pa.employee_id) AS employees_on_projects,
+    ROUND(COUNT(DISTINCT pa.employee_id) / COUNT(DISTINCT e.id) * 100, 2) AS utilization_percentage
+FROM departments d
+LEFT JOIN employees e ON d.id = e.department_id AND e.status = 'active'
+LEFT JOIN projects p ON d.id = p.department_id AND p.status IN ('active', 'planning')
+LEFT JOIN project_assignments pa ON p.id = pa.project_id
+GROUP BY d.id, d.name, d.budget
+ORDER BY utilization_percentage DESC;
+
+-- Stored Procedures
+
+DELIMITER //
+
+CREATE PROCEDURE GetEmployeeDetails(IN emp_id VARCHAR(20))
+BEGIN
+    SELECT 
+        e.employee_id,
+        CONCAT(u.first_name, ' ', u.last_name) AS full_name,
+        u.email,
+        e.position,
+        e.salary,
+        d.name AS department,
+        e.hire_date,
+        e.status,
+        CONCAT(mu.first_name, ' ', mu.last_name) AS manager_name
+    FROM employees e
+    JOIN users u ON e.user_id = u.id
+    JOIN departments d ON e.department_id = d.id
+    LEFT JOIN employees m ON e.manager_id = m.id
+    LEFT JOIN users mu ON m.user_id = mu.id
+    WHERE e.employee_id = emp_id;
+END//
+
+CREATE PROCEDURE UpdateEmployeeSalary(
+    IN emp_id INT,
+    IN new_sal DECIMAL(10,2),
+    IN reason_text VARCHAR(255),
+    IN approved_by_id INT
+)
+BEGIN
+    DECLARE old_sal DECIMAL(10,2);
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        RESIGNAL;
+    END;
+    
+    START TRANSACTION;
+    
+    -- Get current salary
+    SELECT salary INTO old_sal FROM employees WHERE id = emp_id;
+    
+    -- Update employee salary
+    UPDATE employees SET salary = new_sal WHERE id = emp_id;
+    
+    -- Insert salary history record
+    INSERT INTO salary_history (employee_id, old_salary, new_salary, effective_date, reason, approved_by)
+    VALUES (emp_id, old_sal, new_sal, CURDATE(), reason_text, approved_by_id);
+    
+    COMMIT;
+END//
+
+DELIMITER ;
+
+-- Views
+
+CREATE VIEW employee_summary AS
+SELECT 
+    e.employee_id,
+    CONCAT(u.first_name, ' ', u.last_name) AS full_name,
+    u.email,
+    e.position,
+    e.salary,
+    d.name AS department,
+    e.hire_date,
+    e.status,
+    TIMESTAMPDIFF(YEAR, e.hire_date, CURDATE()) AS years_with_company
+FROM employees e
+JOIN users u ON e.user_id = u.id
+JOIN departments d ON e.department_id = d.id;
+
+CREATE VIEW project_overview AS
+SELECT 
+    p.name AS project_name,
+    p.status,
+    p.priority,
+    p.start_date,
+    p.end_date,
+    p.budget,
+    d.name AS department,
+    CONCAT(mu.first_name, ' ', mu.last_name) AS project_manager,
+    COUNT(pa.employee_id) AS team_size
+FROM projects p
+JOIN departments d ON p.department_id = d.id
+LEFT JOIN employees pm ON p.project_manager_id = pm.id
+LEFT JOIN users mu ON pm.user_id = mu.id
+LEFT JOIN project_assignments pa ON p.id = pa.project_id
+GROUP BY p.id, p.name, p.status, p.priority, p.start_date, p.end_date, p.budget, d.name, mu.first_name, mu.last_name;
+
+-- Triggers
+
+DELIMITER //
+
+CREATE TRIGGER update_employee_timestamp
+BEFORE UPDATE ON employees
+FOR EACH ROW
+BEGIN
+    SET NEW.updated_at = CURRENT_TIMESTAMP;
+END//
+
+CREATE TRIGGER salary_change_audit
+AFTER UPDATE ON employees
+FOR EACH ROW
+BEGIN
+    IF OLD.salary != NEW.salary THEN
+        INSERT INTO salary_history (employee_id, old_salary, new_salary, effective_date, reason)
+        VALUES (NEW.id, OLD.salary, NEW.salary, CURDATE(), 'Direct update');
+    END IF;
+END//
+
+DELIMITER ;
+
+-- Indexes for performance optimization
+CREATE INDEX idx_project_assignments_dates ON project_assignments(start_date, end_date);
+CREATE INDEX idx_attendance_employee_date ON attendance(employee_id, date);
+CREATE INDEX idx_salary_history_employee_date ON salary_history(employee_id, effective_date);
+CREATE INDEX idx_projects_status_priority ON projects(status, priority);
+CREATE INDEX idx_employees_department_status ON employees(department_id, status);
+
+-- Cleanup and maintenance queries
+
+-- Remove old attendance records (older than 2 years)
+DELETE FROM attendance WHERE date < DATE_SUB(CURDATE(), INTERVAL 2 YEAR);
+
+-- Archive completed projects older than 1 year
+UPDATE projects 
+SET status = 'archived' 
+WHERE status = 'completed' 
+AND end_date < DATE_SUB(CURDATE(), INTERVAL 1 YEAR);
+
+-- Update employee status for terminated employees
+UPDATE employees 
+SET status = 'terminated' 
+WHERE id IN (
+    SELECT employee_id 
+    FROM attendance 
+    WHERE date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+    GROUP BY employee_id 
+    HAVING COUNT(*) = 0
+);
+
+-- Generate monthly reports
+SELECT 
+    'Monthly Department Summary' AS report_type,
+    DATE_FORMAT(CURDATE(), '%Y-%m') AS report_month,
+    COUNT(*) AS total_departments
+FROM departments
+UNION ALL
+SELECT 
+    'Active Employees',
+    DATE_FORMAT(CURDATE(), '%Y-%m'),
+    COUNT(*)
+FROM employees WHERE status = 'active'
+UNION ALL
+SELECT 
+    'Active Projects',
+    DATE_FORMAT(CURDATE(), '%Y-%m'),
+    COUNT(*)
+FROM projects WHERE status = 'active';

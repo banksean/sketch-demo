@@ -1,0 +1,647 @@
+# Shell Scripting and DevOps Examples
+
+#!/bin/bash
+
+# System administration and DevOps automation scripts
+
+# Configuration variables
+LOG_DIR="/var/log/myapp"
+BACKUP_DIR="/backup"
+APP_NAME="myapp"
+DB_NAME="myapp_db"
+DB_USER="myapp_user"
+NGINX_CONFIG="/etc/nginx/sites-available/myapp"
+SERVICE_NAME="myapp.service"
+
+# Logging function
+log() {
+    local level=$1
+    shift
+    local message="$@"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "[$timestamp] [$level] $message" | tee -a "$LOG_DIR/deployment.log"
+}
+
+# Error handling
+set -euo pipefail
+trap 'log ERROR "Script failed at line $LINENO"' ERR
+
+# Check if running as root
+check_root() {
+    if [[ $EUID -ne 0 ]]; then
+        log ERROR "This script must be run as root"
+        exit 1
+    fi
+}
+
+# System information gathering
+get_system_info() {
+    log INFO "Gathering system information..."
+    
+    echo "=== System Information ==="
+    echo "Hostname: $(hostname)"
+    echo "OS: $(lsb_release -d | cut -f2)"
+    echo "Kernel: $(uname -r)"
+    echo "Architecture: $(uname -m)"
+    echo "Uptime: $(uptime -p)"
+    echo "Load Average: $(uptime | awk -F'load average:' '{print $2}')"
+    echo "Memory Usage: $(free -h | grep '^Mem:' | awk '{print $3"/"$2}')"
+    echo "Disk Usage: $(df -h / | tail -1 | awk '{print $3"/"$2" ("$5" used)"}')"
+    echo "Current Users: $(who | wc -l)"
+    echo "Running Processes: $(ps aux | wc -l)"
+    echo
+}
+
+# Package management
+install_dependencies() {
+    log INFO "Installing system dependencies..."
+    
+    # Update package lists
+    apt-get update
+    
+    # Install essential packages
+    local packages=(
+        "curl"
+        "wget"
+        "git"
+        "vim"
+        "htop"
+        "nginx"
+        "postgresql"
+        "postgresql-contrib"
+        "redis-server"
+        "certbot"
+        "python3-certbot-nginx"
+        "ufw"
+        "fail2ban"
+        "logrotate"
+        "cron"
+        "supervisor"
+    )
+    
+    for package in "${packages[@]}"; do
+        if ! dpkg -l | grep -q "^ii  $package "; then
+            log INFO "Installing $package..."
+            apt-get install -y "$package"
+        else
+            log INFO "$package is already installed"
+        fi
+    done
+}
+
+# Database setup
+setup_database() {
+    log INFO "Setting up PostgreSQL database..."
+    
+    # Start PostgreSQL service
+    systemctl start postgresql
+    systemctl enable postgresql
+    
+    # Create database and user
+    sudo -u postgres psql -c "CREATE DATABASE $DB_NAME;" 2>/dev/null || log WARN "Database $DB_NAME already exists"
+    sudo -u postgres psql -c "CREATE USER $DB_USER WITH PASSWORD 'secure_password';" 2>/dev/null || log WARN "User $DB_USER already exists"
+    sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE $DB_NAME TO $DB_USER;"
+    
+    log INFO "Database setup completed"
+}
+
+# Firewall configuration
+setup_firewall() {
+    log INFO "Configuring firewall..."
+    
+    # Reset UFW to defaults
+    ufw --force reset
+    
+    # Set default policies
+    ufw default deny incoming
+    ufw default allow outgoing
+    
+    # Allow SSH (be careful with this!)
+    ufw allow ssh
+    
+    # Allow HTTP and HTTPS
+    ufw allow 80/tcp
+    ufw allow 443/tcp
+    
+    # Allow application port
+    ufw allow 8000/tcp
+    
+    # Enable firewall
+    ufw --force enable
+    
+    log INFO "Firewall configuration completed"
+}
+
+# SSL certificate setup
+setup_ssl() {
+    local domain=$1
+    
+    if [[ -z "$domain" ]]; then
+        log ERROR "Domain name is required for SSL setup"
+        return 1
+    fi
+    
+    log INFO "Setting up SSL certificate for $domain..."
+    
+    # Install SSL certificate
+    certbot --nginx -d "$domain" --non-interactive --agree-tos --email "admin@$domain" --redirect
+    
+    # Setup auto-renewal
+    (crontab -l 2>/dev/null || echo "") | grep -v "certbot renew" | crontab -
+    (crontab -l 2>/dev/null; echo "0 12 * * * /usr/bin/certbot renew --quiet") | crontab -
+    
+    log INFO "SSL certificate setup completed"
+}
+
+# Nginx configuration
+setup_nginx() {
+    log INFO "Configuring Nginx..."
+    
+    # Create Nginx configuration
+    cat > "$NGINX_CONFIG" << 'EOF'
+server {
+    listen 80;
+    server_name example.com www.example.com;
+    
+    # Redirect HTTP to HTTPS
+    return 301 https://$server_name$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name example.com www.example.com;
+    
+    # SSL configuration will be added by certbot
+    
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    
+    # Gzip compression
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_types text/plain text/css text/xml text/javascript application/x-javascript application/xml+rss application/json;
+    
+    # Static files
+    location /static/ {
+        alias /var/www/myapp/static/;
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+    }
+    
+    # Media files
+    location /media/ {
+        alias /var/www/myapp/media/;
+        expires 30d;
+    }
+    
+    # Application
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300;
+        proxy_connect_timeout 300;
+        proxy_send_timeout 300;
+    }
+    
+    # Health check endpoint
+    location /health {
+        access_log off;
+        proxy_pass http://127.0.0.1:8000/health;
+    }
+}
+EOF
+
+    # Enable the site
+    ln -sf "$NGINX_CONFIG" /etc/nginx/sites-enabled/
+    
+    # Remove default site
+    rm -f /etc/nginx/sites-enabled/default
+    
+    # Test configuration
+    nginx -t
+    
+    # Restart Nginx
+    systemctl restart nginx
+    systemctl enable nginx
+    
+    log INFO "Nginx configuration completed"
+}
+
+# Application deployment
+deploy_application() {
+    local repo_url=$1
+    local app_dir="/var/www/$APP_NAME"
+    
+    log INFO "Deploying application from $repo_url..."
+    
+    # Create application directory
+    mkdir -p "$app_dir"
+    
+    # Clone or update repository
+    if [[ -d "$app_dir/.git" ]]; then
+        log INFO "Updating existing repository..."
+        cd "$app_dir"
+        git pull origin main
+    else
+        log INFO "Cloning repository..."
+        git clone "$repo_url" "$app_dir"
+        cd "$app_dir"
+    fi
+    
+    # Install Python dependencies
+    if [[ -f "requirements.txt" ]]; then
+        log INFO "Installing Python dependencies..."
+        python3 -m venv venv
+        source venv/bin/activate
+        pip install -r requirements.txt
+    fi
+    
+    # Install Node.js dependencies
+    if [[ -f "package.json" ]]; then
+        log INFO "Installing Node.js dependencies..."
+        npm install
+        npm run build
+    fi
+    
+    # Set permissions
+    chown -R www-data:www-data "$app_dir"
+    chmod -R 755 "$app_dir"
+    
+    log INFO "Application deployment completed"
+}
+
+# Systemd service setup
+setup_systemd_service() {
+    log INFO "Setting up systemd service..."
+    
+    cat > "/etc/systemd/system/$SERVICE_NAME" << 'EOF'
+[Unit]
+Description=MyApp Web Application
+After=network.target postgresql.service redis.service
+Wants=postgresql.service redis.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/myapp
+Environment=PATH=/var/www/myapp/venv/bin
+Environment=DJANGO_SETTINGS_MODULE=myapp.settings.production
+ExecStart=/var/www/myapp/venv/bin/gunicorn myapp.wsgi:application --bind 127.0.0.1:8000 --workers 4
+ExecReload=/bin/kill -s HUP $MAINPID
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Reload systemd and enable service
+    systemctl daemon-reload
+    systemctl enable "$SERVICE_NAME"
+    systemctl start "$SERVICE_NAME"
+    
+    log INFO "Systemd service setup completed"
+}
+
+# Monitoring setup
+setup_monitoring() {
+    log INFO "Setting up monitoring..."
+    
+    # Create monitoring script
+    cat > "/usr/local/bin/monitor.sh" << 'EOF'
+#!/bin/bash
+
+# System monitoring script
+
+LOG_FILE="/var/log/monitor.log"
+ALERT_EMAIL="admin@example.com"
+
+# Check disk space
+check_disk_space() {
+    local usage=$(df / | tail -1 | awk '{print $5}' | sed 's/%//')
+    if [[ $usage -gt 80 ]]; then
+        echo "WARNING: Disk usage is at ${usage}%" | mail -s "Disk Space Alert" $ALERT_EMAIL
+    fi
+}
+
+# Check memory usage
+check_memory() {
+    local usage=$(free | grep Mem | awk '{printf "%.0f", $3/$2 * 100.0}')
+    if [[ $usage -gt 90 ]]; then
+        echo "WARNING: Memory usage is at ${usage}%" | mail -s "Memory Alert" $ALERT_EMAIL
+    fi
+}
+
+# Check service status
+check_service() {
+    local service=$1
+    if ! systemctl is-active --quiet $service; then
+        echo "ERROR: Service $service is not running" | mail -s "Service Alert" $ALERT_EMAIL
+        systemctl restart $service
+    fi
+}
+
+# Check SSL certificate expiration
+check_ssl_expiry() {
+    local domain=$1
+    local expiry_date=$(echo | openssl s_client -servername $domain -connect $domain:443 2>/dev/null | openssl x509 -noout -dates | grep notAfter | cut -d= -f2)
+    local expiry_timestamp=$(date -d "$expiry_date" +%s)
+    local current_timestamp=$(date +%s)
+    local days_until_expiry=$(( (expiry_timestamp - current_timestamp) / 86400 ))
+    
+    if [[ $days_until_expiry -lt 30 ]]; then
+        echo "WARNING: SSL certificate for $domain expires in $days_until_expiry days" | mail -s "SSL Certificate Alert" $ALERT_EMAIL
+    fi
+}
+
+# Run checks
+check_disk_space
+check_memory
+check_service nginx
+check_service postgresql
+check_service myapp
+# check_ssl_expiry example.com
+
+echo "$(date): Monitoring checks completed" >> $LOG_FILE
+EOF
+
+    chmod +x /usr/local/bin/monitor.sh
+    
+    # Add to crontab
+    (crontab -l 2>/dev/null || echo "") | grep -v "monitor.sh" | crontab -
+    (crontab -l 2>/dev/null; echo "*/5 * * * * /usr/local/bin/monitor.sh") | crontab -
+    
+    log INFO "Monitoring setup completed"
+}
+
+# Backup system
+setup_backup() {
+    log INFO "Setting up backup system..."
+    
+    # Create backup directory
+    mkdir -p "$BACKUP_DIR"
+    
+    # Create backup script
+    cat > "/usr/local/bin/backup.sh" << 'EOF'
+#!/bin/bash
+
+BACKUP_DIR="/backup"
+DATE=$(date +%Y%m%d_%H%M%S)
+APP_DIR="/var/www/myapp"
+DB_NAME="myapp_db"
+DB_USER="myapp_user"
+RETENTION_DAYS=7
+
+# Create backup directory for today
+BACKUP_PATH="$BACKUP_DIR/$DATE"
+mkdir -p "$BACKUP_PATH"
+
+# Backup database
+echo "Backing up database..."
+sudo -u postgres pg_dump -U $DB_USER -h localhost $DB_NAME | gzip > "$BACKUP_PATH/database.sql.gz"
+
+# Backup application files
+echo "Backing up application files..."
+tar -czf "$BACKUP_PATH/app_files.tar.gz" -C "$APP_DIR" .
+
+# Backup configuration files
+echo "Backing up configuration files..."
+tar -czf "$BACKUP_PATH/config_files.tar.gz" /etc/nginx/sites-available /etc/systemd/system/*.service
+
+# Remove old backups
+echo "Cleaning up old backups..."
+find "$BACKUP_DIR" -type d -name "*_*" -mtime +$RETENTION_DAYS -exec rm -rf {} +
+
+echo "Backup completed: $BACKUP_PATH"
+EOF
+
+    chmod +x /usr/local/bin/backup.sh
+    
+    # Add to crontab for daily backups
+    (crontab -l 2>/dev/null || echo "") | grep -v "backup.sh" | crontab -
+    (crontab -l 2>/dev/null; echo "0 2 * * * /usr/local/bin/backup.sh >> /var/log/backup.log 2>&1") | crontab -
+    
+    log INFO "Backup system setup completed"
+}
+
+# Log rotation setup
+setup_log_rotation() {
+    log INFO "Setting up log rotation..."
+    
+    cat > "/etc/logrotate.d/myapp" << 'EOF'
+/var/log/myapp/*.log {
+    daily
+    missingok
+    rotate 30
+    compress
+    delaycompress
+    notifempty
+    create 644 www-data www-data
+    postrotate
+        systemctl reload myapp.service
+    endscript
+}
+EOF
+
+    log INFO "Log rotation setup completed"
+}
+
+# Performance tuning
+performance_tuning() {
+    log INFO "Applying performance tuning..."
+    
+    # Kernel parameters
+    cat >> /etc/sysctl.conf << 'EOF'
+# Network performance tuning
+net.core.rmem_max = 16777216
+net.core.wmem_max = 16777216
+net.ipv4.tcp_rmem = 4096 87380 16777216
+net.ipv4.tcp_wmem = 4096 65536 16777216
+net.ipv4.tcp_congestion_control = bbr
+
+# File descriptor limits
+fs.file-max = 65536
+
+# Virtual memory tuning
+vm.swappiness = 10
+vm.dirty_ratio = 15
+vm.dirty_background_ratio = 5
+EOF
+
+    # Apply sysctl changes
+    sysctl -p
+    
+    # Increase file descriptor limits
+    cat >> /etc/security/limits.conf << 'EOF'
+* soft nofile 65536
+* hard nofile 65536
+EOF
+
+    log INFO "Performance tuning completed"
+}
+
+# Security hardening
+security_hardening() {
+    log INFO "Applying security hardening..."
+    
+    # Disable root login
+    sed -i 's/PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config
+    
+    # Change SSH port (optional)
+    # sed -i 's/#Port 22/Port 2222/' /etc/ssh/sshd_config
+    
+    # Disable password authentication (use key-based auth)
+    sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
+    
+    # Restart SSH service
+    systemctl restart sshd
+    
+    # Configure fail2ban
+    cat > /etc/fail2ban/jail.local << 'EOF'
+[DEFAULT]
+bantime = 3600
+findtime = 600
+maxretry = 3
+
+[sshd]
+enabled = true
+port = ssh
+logpath = /var/log/auth.log
+
+[nginx-http-auth]
+enabled = true
+port = http,https
+logpath = /var/log/nginx/error.log
+
+[nginx-botsearch]
+enabled = true
+port = http,https
+logpath = /var/log/nginx/access.log
+EOF
+
+    systemctl restart fail2ban
+    systemctl enable fail2ban
+    
+    log INFO "Security hardening completed"
+}
+
+# Health check function
+health_check() {
+    log INFO "Performing health check..."
+    
+    local errors=0
+    
+    # Check services
+    local services=("nginx" "postgresql" "redis-server" "$APP_NAME")
+    for service in "${services[@]}"; do
+        if ! systemctl is-active --quiet "$service"; then
+            log ERROR "Service $service is not running"
+            ((errors++))
+        else
+            log INFO "Service $service is running"
+        fi
+    done
+    
+    # Check disk space
+    local disk_usage=$(df / | tail -1 | awk '{print $5}' | sed 's/%//')
+    if [[ $disk_usage -gt 80 ]]; then
+        log WARN "Disk usage is high: ${disk_usage}%"
+    fi
+    
+    # Check memory usage
+    local mem_usage=$(free | grep Mem | awk '{printf "%.0f", $3/$2 * 100.0}')
+    if [[ $mem_usage -gt 90 ]]; then
+        log WARN "Memory usage is high: ${mem_usage}%"
+    fi
+    
+    # Check application response
+    if ! curl -f -s http://localhost:8000/health > /dev/null; then
+        log ERROR "Application health check failed"
+        ((errors++))
+    else
+        log INFO "Application health check passed"
+    fi
+    
+    if [[ $errors -eq 0 ]]; then
+        log INFO "All health checks passed"
+        return 0
+    else
+        log ERROR "Health check failed with $errors errors"
+        return 1
+    fi
+}
+
+# Main deployment function
+main() {
+    local command=$1
+    shift
+    
+    case $command in
+        "install")
+            check_root
+            get_system_info
+            install_dependencies
+            setup_database
+            setup_firewall
+            ;;
+        "deploy")
+            local repo_url=$1
+            deploy_application "$repo_url"
+            setup_systemd_service
+            setup_nginx
+            ;;
+        "ssl")
+            local domain=$1
+            setup_ssl "$domain"
+            ;;
+        "monitor")
+            setup_monitoring
+            setup_backup
+            setup_log_rotation
+            ;;
+        "harden")
+            security_hardening
+            performance_tuning
+            ;;
+        "health")
+            health_check
+            ;;
+        "backup")
+            /usr/local/bin/backup.sh
+            ;;
+        "logs")
+            local service=${1:-$APP_NAME}
+            journalctl -u "$service" -f
+            ;;
+        "status")
+            systemctl status nginx postgresql redis-server "$SERVICE_NAME"
+            ;;
+        *)
+            echo "Usage: $0 {install|deploy|ssl|monitor|harden|health|backup|logs|status}"
+            echo "  install                    - Install system dependencies"
+            echo "  deploy <repo_url>          - Deploy application"
+            echo "  ssl <domain>               - Setup SSL certificate"
+            echo "  monitor                    - Setup monitoring and backups"
+            echo "  harden                     - Apply security hardening"
+            echo "  health                     - Run health checks"
+            echo "  backup                     - Run backup manually"
+            echo "  logs [service]             - View service logs"
+            echo "  status                     - Check service status"
+            exit 1
+            ;;
+    esac
+}
+
+# Create log directory
+mkdir -p "$LOG_DIR"
+
+# Run main function with all arguments
+main "$@"

@@ -1,0 +1,712 @@
+# C++ Examples
+
+#include <iostream>
+#include <vector>
+#include <map>
+#include <unordered_map>
+#include <string>
+#include <memory>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <atomic>
+#include <future>
+#include <chrono>
+#include <algorithm>
+#include <functional>
+#include <queue>
+#include <stack>
+#include <set>
+#include <regex>
+#include <fstream>
+#include <sstream>
+
+// Forward declarations
+class User;
+class Database;
+class ThreadPool;
+
+// User class
+class User {
+public:
+    User(int id, const std::string& name, const std::string& email, int age)
+        : id_(id), name_(name), email_(email), age_(age) {}
+    
+    // Getters
+    int getId() const { return id_; }
+    const std::string& getName() const { return name_; }
+    const std::string& getEmail() const { return email_; }
+    int getAge() const { return age_; }
+    
+    // Setters
+    void setName(const std::string& name) { name_ = name; }
+    void setEmail(const std::string& email) { email_ = email; }
+    void setAge(int age) { age_ = age; }
+    
+    // Utility methods
+    std::string toString() const {
+        return "User{id=" + std::to_string(id_) + ", name=" + name_ + 
+               ", email=" + email_ + ", age=" + std::to_string(age_) + "}";
+    }
+    
+    // Comparison operators
+    bool operator==(const User& other) const {
+        return id_ == other.id_;
+    }
+    
+    bool operator<(const User& other) const {
+        return id_ < other.id_;
+    }
+
+private:
+    int id_;
+    std::string name_;
+    std::string email_;
+    int age_;
+};
+
+// Smart pointer examples
+class Resource {
+public:
+    Resource(const std::string& name) : name_(name) {
+        std::cout << "Resource " << name_ << " created\n";
+    }
+    
+    ~Resource() {
+        std::cout << "Resource " << name_ << " destroyed\n";
+    }
+    
+    void use() const {
+        std::cout << "Using resource " << name_ << "\n";
+    }
+    
+private:
+    std::string name_;
+};
+
+// Template classes
+template<typename T>
+class Stack {
+public:
+    void push(const T& item) {
+        data_.push_back(item);
+    }
+    
+    void pop() {
+        if (!data_.empty()) {
+            data_.pop_back();
+        }
+    }
+    
+    T& top() {
+        if (data_.empty()) {
+            throw std::runtime_error("Stack is empty");
+        }
+        return data_.back();
+    }
+    
+    const T& top() const {
+        if (data_.empty()) {
+            throw std::runtime_error("Stack is empty");
+        }
+        return data_.back();
+    }
+    
+    bool empty() const {
+        return data_.empty();
+    }
+    
+    size_t size() const {
+        return data_.size();
+    }
+    
+private:
+    std::vector<T> data_;
+};
+
+// Binary Search Tree
+template<typename T>
+class BST {
+public:
+    struct Node {
+        T data;
+        std::unique_ptr<Node> left;
+        std::unique_ptr<Node> right;
+        
+        Node(const T& value) : data(value), left(nullptr), right(nullptr) {}
+    };
+    
+    BST() : root_(nullptr) {}
+    
+    void insert(const T& value) {
+        insertHelper(root_, value);
+    }
+    
+    bool search(const T& value) const {
+        return searchHelper(root_, value);
+    }
+    
+    void inorderTraversal() const {
+        inorderHelper(root_);
+        std::cout << "\n";
+    }
+    
+    void preorderTraversal() const {
+        preorderHelper(root_);
+        std::cout << "\n";
+    }
+    
+    void postorderTraversal() const {
+        postorderHelper(root_);
+        std::cout << "\n";
+    }
+    
+private:
+    std::unique_ptr<Node> root_;
+    
+    void insertHelper(std::unique_ptr<Node>& node, const T& value) {
+        if (!node) {
+            node = std::make_unique<Node>(value);
+            return;
+        }
+        
+        if (value < node->data) {
+            insertHelper(node->left, value);
+        } else if (value > node->data) {
+            insertHelper(node->right, value);
+        }
+    }
+    
+    bool searchHelper(const std::unique_ptr<Node>& node, const T& value) const {
+        if (!node) return false;
+        
+        if (value == node->data) return true;
+        
+        if (value < node->data) {
+            return searchHelper(node->left, value);
+        } else {
+            return searchHelper(node->right, value);
+        }
+    }
+    
+    void inorderHelper(const std::unique_ptr<Node>& node) const {
+        if (node) {
+            inorderHelper(node->left);
+            std::cout << node->data << " ";
+            inorderHelper(node->right);
+        }
+    }
+    
+    void preorderHelper(const std::unique_ptr<Node>& node) const {
+        if (node) {
+            std::cout << node->data << " ";
+            preorderHelper(node->left);
+            preorderHelper(node->right);
+        }
+    }
+    
+    void postorderHelper(const std::unique_ptr<Node>& node) const {
+        if (node) {
+            postorderHelper(node->left);
+            postorderHelper(node->right);
+            std::cout << node->data << " ";
+        }
+    }
+};
+
+// Thread Pool implementation
+class ThreadPool {
+public:
+    ThreadPool(size_t numThreads) : stop_(false) {
+        for (size_t i = 0; i < numThreads; ++i) {
+            workers_.emplace_back([this] {
+                for (;;) {
+                    std::function<void()> task;
+                    
+                    {
+                        std::unique_lock<std::mutex> lock(queueMutex_);
+                        condition_.wait(lock, [this] { return stop_ || !tasks_.empty(); });
+                        
+                        if (stop_ && tasks_.empty()) {
+                            return;
+                        }
+                        
+                        task = std::move(tasks_.front());
+                        tasks_.pop();
+                    }
+                    
+                    task();
+                }
+            });
+        }
+    }
+    
+    template<class F, class... Args>
+    auto enqueue(F&& f, Args&&... args) -> std::future<typename std::result_of<F(Args...)>::type> {
+        using return_type = typename std::result_of<F(Args...)>::type;
+        
+        auto task = std::make_shared<std::packaged_task<return_type()>>(
+            std::bind(std::forward<F>(f), std::forward<Args>(args)...)
+        );
+        
+        std::future<return_type> result = task->get_future();
+        
+        {
+            std::unique_lock<std::mutex> lock(queueMutex_);
+            
+            if (stop_) {
+                throw std::runtime_error("enqueue on stopped ThreadPool");
+            }
+            
+            tasks_.emplace([task]() { (*task)(); });
+        }
+        
+        condition_.notify_one();
+        return result;
+    }
+    
+    ~ThreadPool() {
+        {
+            std::unique_lock<std::mutex> lock(queueMutex_);
+            stop_ = true;
+        }
+        
+        condition_.notify_all();
+        
+        for (std::thread &worker : workers_) {
+            worker.join();
+        }
+    }
+    
+private:
+    std::vector<std::thread> workers_;
+    std::queue<std::function<void()>> tasks_;
+    std::mutex queueMutex_;
+    std::condition_variable condition_;
+    bool stop_;
+};
+
+// Observer Pattern
+class Observer {
+public:
+    virtual ~Observer() = default;
+    virtual void update(const std::string& message) = 0;
+};
+
+class Subject {
+public:
+    void attach(std::shared_ptr<Observer> observer) {
+        observers_.push_back(observer);
+    }
+    
+    void detach(std::shared_ptr<Observer> observer) {
+        observers_.erase(
+            std::remove_if(observers_.begin(), observers_.end(),
+                [observer](const std::weak_ptr<Observer>& weak) {
+                    return weak.expired() || weak.lock() == observer;
+                }),
+            observers_.end()
+        );
+    }
+    
+    void notify(const std::string& message) {
+        for (auto it = observers_.begin(); it != observers_.end();) {
+            if (auto observer = it->lock()) {
+                observer->update(message);
+                ++it;
+            } else {
+                it = observers_.erase(it);
+            }
+        }
+    }
+    
+private:
+    std::vector<std::weak_ptr<Observer>> observers_;
+};
+
+class ConcreteObserver : public Observer {
+public:
+    ConcreteObserver(const std::string& name) : name_(name) {}
+    
+    void update(const std::string& message) override {
+        std::cout << name_ << " received: " << message << "\n";
+    }
+    
+private:
+    std::string name_;
+};
+
+// Sorting algorithms
+namespace Algorithms {
+    template<typename Iterator>
+    void quicksort(Iterator begin, Iterator end) {
+        if (std::distance(begin, end) <= 1) return;
+        
+        auto pivot = partition(begin, end);
+        quicksort(begin, pivot);
+        quicksort(pivot + 1, end);
+    }
+    
+    template<typename Iterator>
+    Iterator partition(Iterator begin, Iterator end) {
+        auto pivot = std::prev(end);
+        auto i = begin;
+        
+        for (auto j = begin; j != pivot; ++j) {
+            if (*j <= *pivot) {
+                std::iter_swap(i, j);
+                ++i;
+            }
+        }
+        
+        std::iter_swap(i, pivot);
+        return i;
+    }
+    
+    template<typename Iterator, typename T>
+    Iterator binarySearch(Iterator begin, Iterator end, const T& value) {
+        Iterator left = begin;
+        Iterator right = end;
+        
+        while (left < right) {
+            Iterator mid = left + std::distance(left, right) / 2;
+            
+            if (*mid == value) {
+                return mid;
+            } else if (*mid < value) {
+                left = mid + 1;
+            } else {
+                right = mid;
+            }
+        }
+        
+        return end;
+    }
+    
+    template<typename Iterator>
+    void mergeSort(Iterator begin, Iterator end) {
+        auto length = std::distance(begin, end);
+        if (length <= 1) return;
+        
+        auto mid = begin + length / 2;
+        mergeSort(begin, mid);
+        mergeSort(mid, end);
+        
+        std::vector<typename Iterator::value_type> temp(begin, end);
+        auto left = temp.begin();
+        auto leftEnd = temp.begin() + length / 2;
+        auto right = leftEnd;
+        auto rightEnd = temp.end();
+        
+        auto result = begin;
+        
+        while (left != leftEnd && right != rightEnd) {
+            if (*left <= *right) {
+                *result = *left;
+                ++left;
+            } else {
+                *result = *right;
+                ++right;
+            }
+            ++result;
+        }
+        
+        while (left != leftEnd) {
+            *result = *left;
+            ++left;
+            ++result;
+        }
+        
+        while (right != rightEnd) {
+            *result = *right;
+            ++right;
+            ++result;
+        }
+    }
+}
+
+// Cache implementation
+template<typename Key, typename Value>
+class LRUCache {
+public:
+    LRUCache(size_t capacity) : capacity_(capacity) {}
+    
+    Value get(const Key& key) {
+        auto it = cache_.find(key);
+        if (it == cache_.end()) {
+            throw std::runtime_error("Key not found");
+        }
+        
+        // Move to front
+        order_.splice(order_.begin(), order_, it->second);
+        return it->second->second;
+    }
+    
+    void put(const Key& key, const Value& value) {
+        auto it = cache_.find(key);
+        
+        if (it != cache_.end()) {
+            // Update existing key
+            it->second->second = value;
+            order_.splice(order_.begin(), order_, it->second);
+        } else {
+            // Add new key
+            if (cache_.size() >= capacity_) {
+                // Remove least recently used
+                auto last = order_.back();
+                cache_.erase(last.first);
+                order_.pop_back();
+            }
+            
+            order_.emplace_front(key, value);
+            cache_[key] = order_.begin();
+        }
+    }
+    
+    bool contains(const Key& key) const {
+        return cache_.find(key) != cache_.end();
+    }
+    
+    size_t size() const {
+        return cache_.size();
+    }
+    
+private:
+    size_t capacity_;
+    std::list<std::pair<Key, Value>> order_;
+    std::unordered_map<Key, typename std::list<std::pair<Key, Value>>::iterator> cache_;
+};
+
+// File operations
+class FileManager {
+public:
+    static std::string readFile(const std::string& filename) {
+        std::ifstream file(filename);
+        if (!file.is_open()) {
+            throw std::runtime_error("Cannot open file: " + filename);
+        }
+        
+        std::stringstream buffer;
+        buffer << file.rdbuf();
+        return buffer.str();
+    }
+    
+    static void writeFile(const std::string& filename, const std::string& content) {
+        std::ofstream file(filename);
+        if (!file.is_open()) {
+            throw std::runtime_error("Cannot create file: " + filename);
+        }
+        
+        file << content;
+    }
+    
+    static std::vector<std::string> readLines(const std::string& filename) {
+        std::ifstream file(filename);
+        if (!file.is_open()) {
+            throw std::runtime_error("Cannot open file: " + filename);
+        }
+        
+        std::vector<std::string> lines;
+        std::string line;
+        while (std::getline(file, line)) {
+            lines.push_back(line);
+        }
+        
+        return lines;
+    }
+};
+
+// String utilities
+namespace StringUtils {
+    std::vector<std::string> split(const std::string& str, char delimiter) {
+        std::vector<std::string> tokens;
+        std::stringstream ss(str);
+        std::string token;
+        
+        while (std::getline(ss, token, delimiter)) {
+            tokens.push_back(token);
+        }
+        
+        return tokens;
+    }
+    
+    std::string trim(const std::string& str) {
+        size_t first = str.find_first_not_of(' ');
+        if (first == std::string::npos) return "";
+        
+        size_t last = str.find_last_not_of(' ');
+        return str.substr(first, (last - first + 1));
+    }
+    
+    std::string toLower(const std::string& str) {
+        std::string result = str;
+        std::transform(result.begin(), result.end(), result.begin(), ::tolower);
+        return result;
+    }
+    
+    std::string toUpper(const std::string& str) {
+        std::string result = str;
+        std::transform(result.begin(), result.end(), result.begin(), ::toupper);
+        return result;
+    }
+    
+    bool startsWith(const std::string& str, const std::string& prefix) {
+        return str.length() >= prefix.length() &&
+               str.substr(0, prefix.length()) == prefix;
+    }
+    
+    bool endsWith(const std::string& str, const std::string& suffix) {
+        return str.length() >= suffix.length() &&
+               str.substr(str.length() - suffix.length()) == suffix;
+    }
+    
+    std::string replace(const std::string& str, const std::string& from, const std::string& to) {
+        std::string result = str;
+        size_t pos = 0;
+        
+        while ((pos = result.find(from, pos)) != std::string::npos) {
+            result.replace(pos, from.length(), to);
+            pos += to.length();
+        }
+        
+        return result;
+    }
+}
+
+// Main function with examples
+int main() {
+    std::cout << "=== C++ Examples Demo ===\n\n";
+    
+    // User class example
+    std::cout << "1. User class example:\n";
+    User user(1, "John Doe", "john@example.com", 30);
+    std::cout << user.toString() << "\n\n";
+    
+    // Smart pointers example
+    std::cout << "2. Smart pointers example:\n";
+    {
+        auto resource = std::make_unique<Resource>("SharedResource");
+        resource->use();
+    }
+    std::cout << "\n";
+    
+    // Template stack example
+    std::cout << "3. Template stack example:\n";
+    Stack<int> intStack;
+    intStack.push(10);
+    intStack.push(20);
+    intStack.push(30);
+    
+    while (!intStack.empty()) {
+        std::cout << "Popped: " << intStack.top() << "\n";
+        intStack.pop();
+    }
+    std::cout << "\n";
+    
+    // BST example
+    std::cout << "4. Binary Search Tree example:\n";
+    BST<int> bst;
+    bst.insert(50);
+    bst.insert(30);
+    bst.insert(70);
+    bst.insert(20);
+    bst.insert(40);
+    bst.insert(60);
+    bst.insert(80);
+    
+    std::cout << "Inorder traversal: ";
+    bst.inorderTraversal();
+    
+    std::cout << "Search 40: " << (bst.search(40) ? "Found" : "Not found") << "\n";
+    std::cout << "Search 90: " << (bst.search(90) ? "Found" : "Not found") << "\n\n";
+    
+    // Sorting algorithms
+    std::cout << "5. Sorting algorithms:\n";
+    std::vector<int> numbers = {64, 34, 25, 12, 22, 11, 90};
+    
+    auto quickSortData = numbers;
+    Algorithms::quicksort(quickSortData.begin(), quickSortData.end());
+    std::cout << "Quicksort result: ";
+    for (int n : quickSortData) std::cout << n << " ";
+    std::cout << "\n";
+    
+    auto mergeSortData = numbers;
+    Algorithms::mergeSort(mergeSortData.begin(), mergeSortData.end());
+    std::cout << "Merge sort result: ";
+    for (int n : mergeSortData) std::cout << n << " ";
+    std::cout << "\n";
+    
+    // Binary search
+    auto it = Algorithms::binarySearch(quickSortData.begin(), quickSortData.end(), 25);
+    if (it != quickSortData.end()) {
+        std::cout << "Found 25 at position: " << std::distance(quickSortData.begin(), it) << "\n";
+    }
+    std::cout << "\n";
+    
+    // Observer pattern
+    std::cout << "6. Observer pattern example:\n";
+    Subject subject;
+    auto observer1 = std::make_shared<ConcreteObserver>("Observer1");
+    auto observer2 = std::make_shared<ConcreteObserver>("Observer2");
+    
+    subject.attach(observer1);
+    subject.attach(observer2);
+    subject.notify("Hello from subject!");
+    
+    subject.detach(observer1);
+    subject.notify("Second message");
+    std::cout << "\n";
+    
+    // LRU Cache
+    std::cout << "7. LRU Cache example:\n";
+    LRUCache<int, std::string> cache(3);
+    cache.put(1, "one");
+    cache.put(2, "two");
+    cache.put(3, "three");
+    
+    std::cout << "Get 1: " << cache.get(1) << "\n";
+    
+    cache.put(4, "four"); // This should evict key 2
+    
+    std::cout << "Cache contains 2: " << (cache.contains(2) ? "Yes" : "No") << "\n";
+    std::cout << "Cache contains 4: " << (cache.contains(4) ? "Yes" : "No") << "\n\n";
+    
+    // String utilities
+    std::cout << "8. String utilities example:\n";
+    std::string text = "  Hello, World!  ";
+    std::cout << "Original: '" << text << "'\n";
+    std::cout << "Trimmed: '" << StringUtils::trim(text) << "'\n";
+    std::cout << "Lowercase: '" << StringUtils::toLower(text) << "'\n";
+    std::cout << "Uppercase: '" << StringUtils::toUpper(text) << "'\n";
+    
+    std::string csv = "apple,banana,orange";
+    auto tokens = StringUtils::split(csv, ',');
+    std::cout << "Split result: ";
+    for (const auto& token : tokens) {
+        std::cout << "'" << token << "' ";
+    }
+    std::cout << "\n\n";
+    
+    // Thread pool example
+    std::cout << "9. Thread pool example:\n";
+    ThreadPool pool(4);
+    
+    std::vector<std::future<int>> results;
+    
+    for (int i = 0; i < 8; ++i) {
+        results.emplace_back(
+            pool.enqueue([i] {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                return i * i;
+            })
+        );
+    }
+    
+    for (auto& result : results) {
+        std::cout << "Result: " << result.get() << "\n";
+    }
+    
+    std::cout << "\n=== Demo completed! ===\n";
+    
+    return 0;
+}

@@ -1,0 +1,805 @@
+# Ruby Examples
+
+require 'json'
+require 'net/http'
+require 'uri'
+require 'sqlite3'
+require 'thread'
+require 'monitor'
+require 'ostruct'
+require 'benchmark'
+require 'digest'
+require 'base64'
+require 'fileutils'
+require 'csv'
+require 'yaml'
+require 'logger'
+
+# User class with validation
+class User
+  attr_accessor :id, :name, :email, :age, :created_at
+  
+  def initialize(id: nil, name:, email:, age:, created_at: Time.now)
+    @id = id
+    @name = validate_name(name)
+    @email = validate_email(email)
+    @age = validate_age(age)
+    @created_at = created_at
+  end
+  
+  def to_h
+    {
+      id: @id,
+      name: @name,
+      email: @email,
+      age: @age,
+      created_at: @created_at
+    }
+  end
+  
+  def to_json(*args)
+    to_h.to_json(*args)
+  end
+  
+  def self.from_json(json_str)
+    data = JSON.parse(json_str, symbolize_names: true)
+    new(**data)
+  end
+  
+  def ==(other)
+    other.is_a?(User) && @id == other.id
+  end
+  
+  def hash
+    @id.hash
+  end
+  
+  def eql?(other)
+    self == other
+  end
+  
+  def to_s
+    "User(#{@id}): #{@name} <#{@email}> (#{@age} years old)"
+  end
+  
+  private
+  
+  def validate_name(name)
+    raise ArgumentError, "Name cannot be empty" if name.nil? || name.strip.empty?
+    raise ArgumentError, "Name must be a string" unless name.is_a?(String)
+    name.strip
+  end
+  
+  def validate_email(email)
+    raise ArgumentError, "Email cannot be empty" if email.nil? || email.strip.empty?
+    raise ArgumentError, "Invalid email format" unless email.match?(/\A[\w+\-.]+@[a-z\d\-]+(\.[a-z\d\-]+)*\.[a-z]+\z/i)
+    email.strip.downcase
+  end
+  
+  def validate_age(age)
+    raise ArgumentError, "Age must be a number" unless age.is_a?(Numeric)
+    raise ArgumentError, "Age must be non-negative" if age < 0
+    raise ArgumentError, "Age must be realistic" if age > 150
+    age.to_i
+  end
+end
+
+# Database wrapper class
+class Database
+  def initialize(db_path)
+    @db = SQLite3::Database.new(db_path)
+    @db.results_as_hash = true
+    create_tables
+  end
+  
+  def create_user(user_data)
+    @db.execute(
+      "INSERT INTO users (name, email, age, created_at) VALUES (?, ?, ?, ?)",
+      [user_data[:name], user_data[:email], user_data[:age], user_data[:created_at]]
+    )
+    
+    user_id = @db.last_insert_row_id
+    get_user(user_id)
+  end
+  
+  def get_user(id)
+    result = @db.execute("SELECT * FROM users WHERE id = ?", [id]).first
+    return nil unless result
+    
+    User.new(
+      id: result['id'],
+      name: result['name'],
+      email: result['email'],
+      age: result['age'],
+      created_at: Time.parse(result['created_at'])
+    )
+  end
+  
+  def get_all_users
+    results = @db.execute("SELECT * FROM users ORDER BY created_at DESC")
+    results.map do |row|
+      User.new(
+        id: row['id'],
+        name: row['name'],
+        email: row['email'],
+        age: row['age'],
+        created_at: Time.parse(row['created_at'])
+      )
+    end
+  end
+  
+  def update_user(id, user_data)
+    @db.execute(
+      "UPDATE users SET name = ?, email = ?, age = ? WHERE id = ?",
+      [user_data[:name], user_data[:email], user_data[:age], id]
+    )
+    
+    get_user(id)
+  end
+  
+  def delete_user(id)
+    result = @db.execute("DELETE FROM users WHERE id = ?", [id])
+    @db.changes > 0
+  end
+  
+  def search_users(query)
+    results = @db.execute(
+      "SELECT * FROM users WHERE name LIKE ? OR email LIKE ?",
+      ["%#{query}%", "%#{query}%"]
+    )
+    
+    results.map do |row|
+      User.new(
+        id: row['id'],
+        name: row['name'],
+        email: row['email'],
+        age: row['age'],
+        created_at: Time.parse(row['created_at'])
+      )
+    end
+  end
+  
+  def close
+    @db.close
+  end
+  
+  private
+  
+  def create_tables
+    @db.execute <<-SQL
+      CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        email TEXT NOT NULL UNIQUE,
+        age INTEGER NOT NULL,
+        created_at TEXT NOT NULL
+      )
+    SQL
+  end
+end
+
+# HTTP client class
+class HttpClient
+  def initialize(base_url, timeout: 30)
+    @base_url = base_url
+    @timeout = timeout
+  end
+  
+  def get(endpoint, headers: {})
+    uri = URI.join(@base_url, endpoint)
+    request = Net::HTTP::Get.new(uri)
+    set_headers(request, headers)
+    
+    make_request(uri, request)
+  end
+  
+  def post(endpoint, data: nil, headers: {})
+    uri = URI.join(@base_url, endpoint)
+    request = Net::HTTP::Post.new(uri)
+    set_headers(request, headers)
+    
+    if data
+      request.body = data.is_a?(String) ? data : data.to_json
+      request['Content-Type'] = 'application/json'
+    end
+    
+    make_request(uri, request)
+  end
+  
+  def put(endpoint, data: nil, headers: {})
+    uri = URI.join(@base_url, endpoint)
+    request = Net::HTTP::Put.new(uri)
+    set_headers(request, headers)
+    
+    if data
+      request.body = data.is_a?(String) ? data : data.to_json
+      request['Content-Type'] = 'application/json'
+    end
+    
+    make_request(uri, request)
+  end
+  
+  def delete(endpoint, headers: {})
+    uri = URI.join(@base_url, endpoint)
+    request = Net::HTTP::Delete.new(uri)
+    set_headers(request, headers)
+    
+    make_request(uri, request)
+  end
+  
+  private
+  
+  def set_headers(request, headers)
+    headers.each { |key, value| request[key] = value }
+  end
+  
+  def make_request(uri, request)
+    Net::HTTP.start(uri.hostname, uri.port, use_ssl: uri.scheme == 'https', read_timeout: @timeout) do |http|
+      response = http.request(request)
+      
+      case response
+      when Net::HTTPSuccess
+        parse_response(response)
+      else
+        raise "HTTP Error: #{response.code} #{response.message}"
+      end
+    end
+  end
+  
+  def parse_response(response)
+    content_type = response['Content-Type']
+    
+    if content_type&.include?('application/json')
+      JSON.parse(response.body)
+    else
+      response.body
+    end
+  end
+end
+
+# Thread pool implementation
+class ThreadPool
+  def initialize(size)
+    @size = size
+    @jobs = Queue.new
+    @pool = Array.new(size) do
+      Thread.new do
+        catch(:exit) do
+          loop do
+            job, args = @jobs.pop
+            job.call(*args)
+          end
+        end
+      end
+    end
+  end
+  
+  def schedule(*args, &block)
+    @jobs << [block, args]
+  end
+  
+  def shutdown
+    @size.times { schedule { throw :exit } }
+    @pool.each(&:join)
+  end
+end
+
+# Cache implementation with TTL
+class Cache
+  def initialize(default_ttl: 300)
+    @cache = {}
+    @default_ttl = default_ttl
+    @mutex = Mutex.new
+    start_cleanup_thread
+  end
+  
+  def get(key)
+    @mutex.synchronize do
+      entry = @cache[key]
+      return nil unless entry
+      
+      if entry[:expires_at] < Time.now
+        @cache.delete(key)
+        return nil
+      end
+      
+      entry[:value]
+    end
+  end
+  
+  def set(key, value, ttl: @default_ttl)
+    @mutex.synchronize do
+      @cache[key] = {
+        value: value,
+        expires_at: Time.now + ttl
+      }
+    end
+  end
+  
+  def delete(key)
+    @mutex.synchronize do
+      @cache.delete(key)
+    end
+  end
+  
+  def clear
+    @mutex.synchronize do
+      @cache.clear
+    end
+  end
+  
+  def size
+    @mutex.synchronize do
+      @cache.size
+    end
+  end
+  
+  def keys
+    @mutex.synchronize do
+      @cache.keys
+    end
+  end
+  
+  private
+  
+  def start_cleanup_thread
+    @cleanup_thread = Thread.new do
+      loop do
+        sleep(60) # Run cleanup every minute
+        cleanup_expired
+      end
+    end
+  end
+  
+  def cleanup_expired
+    @mutex.synchronize do
+      now = Time.now
+      @cache.delete_if { |_, entry| entry[:expires_at] < now }
+    end
+  end
+end
+
+# Data structures
+class LinkedList
+  Node = Struct.new(:data, :next)
+  
+  def initialize
+    @head = nil
+    @size = 0
+  end
+  
+  def append(data)
+    new_node = Node.new(data, nil)
+    
+    if @head.nil?
+      @head = new_node
+    else
+      current = @head
+      current = current.next while current.next
+      current.next = new_node
+    end
+    
+    @size += 1
+  end
+  
+  def prepend(data)
+    new_node = Node.new(data, @head)
+    @head = new_node
+    @size += 1
+  end
+  
+  def delete(data)
+    return false if @head.nil?
+    
+    if @head.data == data
+      @head = @head.next
+      @size -= 1
+      return true
+    end
+    
+    current = @head
+    while current.next && current.next.data != data
+      current = current.next
+    end
+    
+    if current.next
+      current.next = current.next.next
+      @size -= 1
+      return true
+    end
+    
+    false
+  end
+  
+  def find(data)
+    current = @head
+    index = 0
+    
+    while current
+      return index if current.data == data
+      current = current.next
+      index += 1
+    end
+    
+    -1
+  end
+  
+  def to_a
+    result = []
+    current = @head
+    
+    while current
+      result << current.data
+      current = current.next
+    end
+    
+    result
+  end
+  
+  def size
+    @size
+  end
+  
+  def empty?
+    @size == 0
+  end
+end
+
+# Binary Search Tree
+class BinarySearchTree
+  Node = Struct.new(:value, :left, :right)
+  
+  def initialize
+    @root = nil
+  end
+  
+  def insert(value)
+    @root = insert_node(@root, value)
+  end
+  
+  def search(value)
+    search_node(@root, value)
+  end
+  
+  def delete(value)
+    @root = delete_node(@root, value)
+  end
+  
+  def inorder_traversal
+    result = []
+    inorder(@root, result)
+    result
+  end
+  
+  def preorder_traversal
+    result = []
+    preorder(@root, result)
+    result
+  end
+  
+  def postorder_traversal
+    result = []
+    postorder(@root, result)
+    result
+  end
+  
+  private
+  
+  def insert_node(node, value)
+    return Node.new(value, nil, nil) if node.nil?
+    
+    if value < node.value
+      node.left = insert_node(node.left, value)
+    elsif value > node.value
+      node.right = insert_node(node.right, value)
+    end
+    
+    node
+  end
+  
+  def search_node(node, value)
+    return false if node.nil?
+    return true if node.value == value
+    
+    if value < node.value
+      search_node(node.left, value)
+    else
+      search_node(node.right, value)
+    end
+  end
+  
+  def delete_node(node, value)
+    return nil if node.nil?
+    
+    if value < node.value
+      node.left = delete_node(node.left, value)
+    elsif value > node.value
+      node.right = delete_node(node.right, value)
+    else
+      # Node to be deleted found
+      return node.right if node.left.nil?
+      return node.left if node.right.nil?
+      
+      # Node with two children
+      min_node = find_min(node.right)
+      node.value = min_node.value
+      node.right = delete_node(node.right, min_node.value)
+    end
+    
+    node
+  end
+  
+  def find_min(node)
+    node = node.left while node.left
+    node
+  end
+  
+  def inorder(node, result)
+    return if node.nil?
+    
+    inorder(node.left, result)
+    result << node.value
+    inorder(node.right, result)
+  end
+  
+  def preorder(node, result)
+    return if node.nil?
+    
+    result << node.value
+    preorder(node.left, result)
+    preorder(node.right, result)
+  end
+  
+  def postorder(node, result)
+    return if node.nil?
+    
+    postorder(node.left, result)
+    postorder(node.right, result)
+    result << node.value
+  end
+end
+
+# Sorting algorithms
+module Sorting
+  def self.quicksort(array)
+    return array if array.length <= 1
+    
+    pivot = array[array.length / 2]
+    left = array.select { |x| x < pivot }
+    middle = array.select { |x| x == pivot }
+    right = array.select { |x| x > pivot }
+    
+    quicksort(left) + middle + quicksort(right)
+  end
+  
+  def self.merge_sort(array)
+    return array if array.length <= 1
+    
+    mid = array.length / 2
+    left = merge_sort(array[0...mid])
+    right = merge_sort(array[mid..-1])
+    
+    merge(left, right)
+  end
+  
+  def self.merge(left, right)
+    result = []
+    i = j = 0
+    
+    while i < left.length && j < right.length
+      if left[i] <= right[j]
+        result << left[i]
+        i += 1
+      else
+        result << right[j]
+        j += 1
+      end
+    end
+    
+    result + left[i..-1] + right[j..-1]
+  end
+  
+  def self.bubble_sort(array)
+    arr = array.dup
+    n = arr.length
+    
+    (n - 1).times do |i|
+      swapped = false
+      (n - i - 1).times do |j|
+        if arr[j] > arr[j + 1]
+          arr[j], arr[j + 1] = arr[j + 1], arr[j]
+          swapped = true
+        end
+      end
+      break unless swapped
+    end
+    
+    arr
+  end
+  
+  def self.binary_search(array, target)
+    left = 0
+    right = array.length - 1
+    
+    while left <= right
+      mid = (left + right) / 2
+      
+      return mid if array[mid] == target
+      
+      if array[mid] < target
+        left = mid + 1
+      else
+        right = mid - 1
+      end
+    end
+    
+    -1
+  end
+end
+
+# Utility classes
+class Logger
+  LEVELS = { debug: 0, info: 1, warn: 2, error: 3 }.freeze
+  
+  def initialize(level: :info, output: $stdout)
+    @level = LEVELS[level]
+    @output = output
+  end
+  
+  def debug(message)
+    log(:debug, message)
+  end
+  
+  def info(message)
+    log(:info, message)
+  end
+  
+  def warn(message)
+    log(:warn, message)
+  end
+  
+  def error(message)
+    log(:error, message)
+  end
+  
+  private
+  
+  def log(level, message)
+    return if LEVELS[level] < @level
+    
+    timestamp = Time.now.strftime('%Y-%m-%d %H:%M:%S')
+    @output.puts "[#{timestamp}] #{level.upcase}: #{message}"
+  end
+end
+
+class ConfigManager
+  def initialize(config_file)
+    @config_file = config_file
+    @config = load_config
+  end
+  
+  def get(key, default = nil)
+    keys = key.to_s.split('.')
+    value = @config
+    
+    keys.each do |k|
+      value = value[k]
+      return default if value.nil?
+    end
+    
+    value
+  end
+  
+  def set(key, value)
+    keys = key.to_s.split('.')
+    current = @config
+    
+    keys[0..-2].each do |k|
+      current[k] ||= {}
+      current = current[k]
+    end
+    
+    current[keys.last] = value
+    save_config
+  end
+  
+  def reload
+    @config = load_config
+  end
+  
+  private
+  
+  def load_config
+    return {} unless File.exist?(@config_file)
+    
+    case File.extname(@config_file)
+    when '.json'
+      JSON.parse(File.read(@config_file))
+    when '.yml', '.yaml'
+      YAML.load_file(@config_file)
+    else
+      raise "Unsupported config file format: #{@config_file}"
+    end
+  rescue => e
+    puts "Error loading config: #{e.message}"
+    {}
+  end
+  
+  def save_config
+    case File.extname(@config_file)
+    when '.json'
+      File.write(@config_file, JSON.pretty_generate(@config))
+    when '.yml', '.yaml'
+      File.write(@config_file, @config.to_yaml)
+    end
+  end
+end
+
+# Example usage and demonstration
+if __FILE__ == $0
+  puts "=== Ruby Examples Demo ==="
+  
+  # User example
+  puts "\n1. User class example:"
+  user = User.new(name: "John Doe", email: "john@example.com", age: 30)
+  puts user
+  puts "User JSON: #{user.to_json}"
+  
+  # Database example
+  puts "\n2. Database example:"
+  db = Database.new(":memory:")
+  created_user = db.create_user(user.to_h)
+  puts "Created user: #{created_user}"
+  
+  all_users = db.get_all_users
+  puts "All users: #{all_users.length}"
+  
+  # Data structures example
+  puts "\n3. Data structures example:"
+  list = LinkedList.new
+  list.append(1)
+  list.append(2)
+  list.append(3)
+  puts "Linked list: #{list.to_a}"
+  
+  bst = BinarySearchTree.new
+  [5, 3, 7, 1, 9, 4, 6].each { |val| bst.insert(val) }
+  puts "BST inorder: #{bst.inorder_traversal}"
+  
+  # Sorting example
+  puts "\n4. Sorting example:"
+  numbers = [64, 34, 25, 12, 22, 11, 90]
+  puts "Original: #{numbers}"
+  puts "Quicksort: #{Sorting.quicksort(numbers.dup)}"
+  puts "Merge sort: #{Sorting.merge_sort(numbers.dup)}"
+  
+  sorted = Sorting.quicksort(numbers)
+  index = Sorting.binary_search(sorted, 25)
+  puts "Binary search for 25: #{index}"
+  
+  # Cache example
+  puts "\n5. Cache example:"
+  cache = Cache.new(default_ttl: 5)
+  cache.set("key1", "value1")
+  cache.set("key2", "value2", ttl: 10)
+  puts "Cache get key1: #{cache.get('key1')}"
+  puts "Cache size: #{cache.size}"
+  
+  # Thread pool example
+  puts "\n6. Thread pool example:"
+  pool = ThreadPool.new(3)
+  
+  5.times do |i|
+    pool.schedule(i) do |num|
+      puts "Processing job #{num} on thread #{Thread.current.object_id}"
+      sleep(0.1)
+    end
+  end
+  
+  sleep(1) # Wait for jobs to complete
+  pool.shutdown
+  
+  puts "\n=== Demo completed! ==="
+  
+  db.close
+end

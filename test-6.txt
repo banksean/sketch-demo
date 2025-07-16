@@ -1,0 +1,534 @@
+# Rust Examples
+
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
+use tokio::time;
+use serde::{Deserialize, Serialize};
+use reqwest;
+use sqlx::{Pool, Postgres, Row};
+
+// Structs and Enums
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct User {
+    pub id: i32,
+    pub name: String,
+    pub email: String,
+    pub age: i32,
+    pub created_at: chrono::NaiveDateTime,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateUserRequest {
+    pub name: String,
+    pub email: String,
+    pub age: i32,
+}
+
+#[derive(Debug)]
+pub enum DatabaseError {
+    ConnectionError(String),
+    QueryError(String),
+    NotFound,
+}
+
+impl std::fmt::Display for DatabaseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DatabaseError::ConnectionError(msg) => write!(f, "Connection error: {}", msg),
+            DatabaseError::QueryError(msg) => write!(f, "Query error: {}", msg),
+            DatabaseError::NotFound => write!(f, "Record not found"),
+        }
+    }
+}
+
+impl std::error::Error for DatabaseError {}
+
+// Database operations
+pub struct Database {
+    pool: Pool<Postgres>,
+}
+
+impl Database {
+    pub async fn new(database_url: &str) -> Result<Self, DatabaseError> {
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(20)
+            .connect(database_url)
+            .await
+            .map_err(|e| DatabaseError::ConnectionError(e.to_string()))?;
+        
+        Ok(Database { pool })
+    }
+
+    pub async fn create_user(&self, user: CreateUserRequest) -> Result<User, DatabaseError> {
+        let row = sqlx::query!(
+            "INSERT INTO users (name, email, age) VALUES ($1, $2, $3) RETURNING id, name, email, age, created_at",
+            user.name,
+            user.email,
+            user.age
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
+
+        Ok(User {
+            id: row.id,
+            name: row.name,
+            email: row.email,
+            age: row.age,
+            created_at: row.created_at,
+        })
+    }
+
+    pub async fn get_user(&self, id: i32) -> Result<User, DatabaseError> {
+        let row = sqlx::query!(
+            "SELECT id, name, email, age, created_at FROM users WHERE id = $1",
+            id
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| match e {
+            sqlx::Error::RowNotFound => DatabaseError::NotFound,
+            _ => DatabaseError::QueryError(e.to_string()),
+        })?;
+
+        Ok(User {
+            id: row.id,
+            name: row.name,
+            email: row.email,
+            age: row.age,
+            created_at: row.created_at,
+        })
+    }
+
+    pub async fn get_all_users(&self) -> Result<Vec<User>, DatabaseError> {
+        let rows = sqlx::query!(
+            "SELECT id, name, email, age, created_at FROM users ORDER BY created_at DESC"
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
+
+        let users = rows
+            .into_iter()
+            .map(|row| User {
+                id: row.id,
+                name: row.name,
+                email: row.email,
+                age: row.age,
+                created_at: row.created_at,
+            })
+            .collect();
+
+        Ok(users)
+    }
+
+    pub async fn update_user(&self, id: i32, user: CreateUserRequest) -> Result<User, DatabaseError> {
+        let row = sqlx::query!(
+            "UPDATE users SET name = $1, email = $2, age = $3 WHERE id = $4 RETURNING id, name, email, age, created_at",
+            user.name,
+            user.email,
+            user.age,
+            id
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| match e {
+            sqlx::Error::RowNotFound => DatabaseError::NotFound,
+            _ => DatabaseError::QueryError(e.to_string()),
+        })?;
+
+        Ok(User {
+            id: row.id,
+            name: row.name,
+            email: row.email,
+            age: row.age,
+            created_at: row.created_at,
+        })
+    }
+
+    pub async fn delete_user(&self, id: i32) -> Result<(), DatabaseError> {
+        let result = sqlx::query!("DELETE FROM users WHERE id = $1", id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
+
+        if result.rows_affected() == 0 {
+            return Err(DatabaseError::NotFound);
+        }
+
+        Ok(())
+    }
+}
+
+// HTTP Client
+pub struct HttpClient {
+    client: reqwest::Client,
+    base_url: String,
+}
+
+impl HttpClient {
+    pub fn new(base_url: String) -> Self {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .expect("Failed to create HTTP client");
+
+        HttpClient { client, base_url }
+    }
+
+    pub async fn get<T>(&self, endpoint: &str) -> Result<T, Box<dyn std::error::Error>>
+    where
+        T: for<'de> Deserialize<'de>,
+    {
+        let url = format!("{}{}", self.base_url, endpoint);
+        let response = self.client.get(&url).send().await?;
+        
+        if response.status().is_success() {
+            let data = response.json::<T>().await?;
+            Ok(data)
+        } else {
+            Err(format!("HTTP error: {}", response.status()).into())
+        }
+    }
+
+    pub async fn post<T, U>(&self, endpoint: &str, data: &T) -> Result<U, Box<dyn std::error::Error>>
+    where
+        T: Serialize,
+        U: for<'de> Deserialize<'de>,
+    {
+        let url = format!("{}{}", self.base_url, endpoint);
+        let response = self.client.post(&url).json(data).send().await?;
+        
+        if response.status().is_success() {
+            let result = response.json::<U>().await?;
+            Ok(result)
+        } else {
+            Err(format!("HTTP error: {}", response.status()).into())
+        }
+    }
+}
+
+// Concurrency examples
+pub struct WorkerPool {
+    workers: Vec<thread::JoinHandle<()>>,
+    sender: std::sync::mpsc::Sender<Box<dyn FnOnce() + Send>>,
+}
+
+impl WorkerPool {
+    pub fn new(size: usize) -> Self {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let receiver = Arc::new(Mutex::new(receiver));
+        let mut workers = Vec::with_capacity(size);
+
+        for _ in 0..size {
+            let receiver = Arc::clone(&receiver);
+            let worker = thread::spawn(move || loop {
+                let job = receiver.lock().unwrap().recv();
+                match job {
+                    Ok(job) => job(),
+                    Err(_) => break,
+                }
+            });
+            workers.push(worker);
+        }
+
+        WorkerPool { workers, sender }
+    }
+
+    pub fn execute<F>(&self, f: F)
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        let job = Box::new(f);
+        self.sender.send(job).unwrap();
+    }
+}
+
+// Cache implementation
+pub struct Cache<K, V> {
+    data: Arc<Mutex<HashMap<K, (V, std::time::Instant)>>>,
+    ttl: Duration,
+}
+
+impl<K, V> Cache<K, V>
+where
+    K: std::hash::Hash + Eq + Clone,
+    V: Clone,
+{
+    pub fn new(ttl: Duration) -> Self {
+        let cache = Cache {
+            data: Arc::new(Mutex::new(HashMap::new())),
+            ttl,
+        };
+
+        // Start cleanup task
+        let data = Arc::clone(&cache.data);
+        let ttl_clone = ttl;
+        tokio::spawn(async move {
+            let mut interval = time::interval(ttl_clone);
+            loop {
+                interval.tick().await;
+                let mut map = data.lock().unwrap();
+                let now = std::time::Instant::now();
+                map.retain(|_, (_, timestamp)| now.duration_since(*timestamp) < ttl_clone);
+            }
+        });
+
+        cache
+    }
+
+    pub fn get(&self, key: &K) -> Option<V> {
+        let map = self.data.lock().unwrap();
+        if let Some((value, timestamp)) = map.get(key) {
+            if std::time::Instant::now().duration_since(*timestamp) < self.ttl {
+                Some(value.clone())
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn set(&self, key: K, value: V) {
+        let mut map = self.data.lock().unwrap();
+        map.insert(key, (value, std::time::Instant::now()));
+    }
+
+    pub fn remove(&self, key: &K) -> Option<V> {
+        let mut map = self.data.lock().unwrap();
+        map.remove(key).map(|(value, _)| value)
+    }
+}
+
+// Algorithm implementations
+pub fn quicksort<T: Ord + Clone>(arr: &mut [T]) {
+    if arr.len() <= 1 {
+        return;
+    }
+
+    let pivot_index = partition(arr);
+    quicksort(&mut arr[0..pivot_index]);
+    quicksort(&mut arr[pivot_index + 1..]);
+}
+
+fn partition<T: Ord>(arr: &mut [T]) -> usize {
+    let len = arr.len();
+    let pivot_index = len - 1;
+    let mut i = 0;
+
+    for j in 0..pivot_index {
+        if arr[j] <= arr[pivot_index] {
+            arr.swap(i, j);
+            i += 1;
+        }
+    }
+
+    arr.swap(i, pivot_index);
+    i
+}
+
+pub fn binary_search<T: Ord>(arr: &[T], target: &T) -> Option<usize> {
+    let mut left = 0;
+    let mut right = arr.len();
+
+    while left < right {
+        let mid = left + (right - left) / 2;
+        match arr[mid].cmp(target) {
+            std::cmp::Ordering::Equal => return Some(mid),
+            std::cmp::Ordering::Less => left = mid + 1,
+            std::cmp::Ordering::Greater => right = mid,
+        }
+    }
+
+    None
+}
+
+// Traits and implementations
+pub trait Drawable {
+    fn draw(&self);
+}
+
+pub struct Circle {
+    radius: f64,
+}
+
+impl Circle {
+    pub fn new(radius: f64) -> Self {
+        Circle { radius }
+    }
+
+    pub fn area(&self) -> f64 {
+        std::f64::consts::PI * self.radius * self.radius
+    }
+}
+
+impl Drawable for Circle {
+    fn draw(&self) {
+        println!("Drawing a circle with radius {}", self.radius);
+    }
+}
+
+pub struct Rectangle {
+    width: f64,
+    height: f64,
+}
+
+impl Rectangle {
+    pub fn new(width: f64, height: f64) -> Self {
+        Rectangle { width, height }
+    }
+
+    pub fn area(&self) -> f64 {
+        self.width * self.height
+    }
+}
+
+impl Drawable for Rectangle {
+    fn draw(&self) {
+        println!("Drawing a rectangle {}x{}", self.width, self.height);
+    }
+}
+
+// Generic functions
+pub fn print_drawable<T: Drawable>(item: &T) {
+    item.draw();
+}
+
+pub fn find_max<T: Ord + Clone>(items: &[T]) -> Option<T> {
+    items.iter().max().cloned()
+}
+
+// Async examples
+pub async fn fetch_user_data(user_id: i32) -> Result<User, Box<dyn std::error::Error>> {
+    let client = HttpClient::new("https://api.example.com".to_string());
+    let user = client.get::<User>(&format!("/users/{}", user_id)).await?;
+    Ok(user)
+}
+
+pub async fn process_users_concurrently(user_ids: Vec<i32>) -> Vec<Result<User, Box<dyn std::error::Error>>> {
+    let futures = user_ids.into_iter().map(|id| fetch_user_data(id));
+    futures::future::join_all(futures).await
+}
+
+// Error handling with Result
+pub fn divide(a: f64, b: f64) -> Result<f64, String> {
+    if b == 0.0 {
+        Err("Division by zero".to_string())
+    } else {
+        Ok(a / b)
+    }
+}
+
+pub fn safe_divide_chain(a: f64, b: f64, c: f64) -> Result<f64, String> {
+    divide(a, b)?.checked_mul(c).ok_or("Overflow".to_string())
+}
+
+// Macros
+macro_rules! vec_of_strings {
+    ($($x:expr),*) => {
+        vec![$($x.to_string()),*]
+    };
+}
+
+macro_rules! hashmap {
+    ($($key:expr => $value:expr),*) => {
+        {
+            let mut map = HashMap::new();
+            $(
+                map.insert($key, $value);
+            )*
+            map
+        }
+    };
+}
+
+// Tests
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_quicksort() {
+        let mut arr = vec![64, 34, 25, 12, 22, 11, 90];
+        quicksort(&mut arr);
+        assert_eq!(arr, vec![11, 12, 22, 25, 34, 64, 90]);
+    }
+
+    #[test]
+    fn test_binary_search() {
+        let arr = vec![1, 3, 5, 7, 9, 11, 13];
+        assert_eq!(binary_search(&arr, &7), Some(3));
+        assert_eq!(binary_search(&arr, &4), None);
+    }
+
+    #[test]
+    fn test_divide() {
+        assert_eq!(divide(10.0, 2.0), Ok(5.0));
+        assert!(divide(10.0, 0.0).is_err());
+    }
+
+    #[test]
+    fn test_circle_area() {
+        let circle = Circle::new(5.0);
+        assert!((circle.area() - 78.54).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_macros() {
+        let strings = vec_of_strings!["hello", "world", "rust"];
+        assert_eq!(strings, vec!["hello", "world", "rust"]);
+
+        let map = hashmap!{
+            "key1" => "value1",
+            "key2" => "value2"
+        };
+        assert_eq!(map.get("key1"), Some(&"value1"));
+    }
+}
+
+// Main function
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Initialize logging
+    env_logger::init();
+
+    // Example usage
+    let mut numbers = vec![64, 34, 25, 12, 22, 11, 90];
+    println!("Original: {:?}", numbers);
+    quicksort(&mut numbers);
+    println!("Sorted: {:?}", numbers);
+
+    let index = binary_search(&numbers, &25);
+    println!("Found 25 at index: {:?}", index);
+
+    let circle = Circle::new(5.0);
+    println!("Circle area: {}", circle.area());
+    circle.draw();
+
+    let rectangle = Rectangle::new(10.0, 5.0);
+    println!("Rectangle area: {}", rectangle.area());
+    rectangle.draw();
+
+    // Cache example
+    let cache = Cache::new(Duration::from_secs(60));
+    cache.set("key1".to_string(), "value1".to_string());
+    
+    if let Some(value) = cache.get(&"key1".to_string()) {
+        println!("Cached value: {}", value);
+    }
+
+    // Macro examples
+    let strings = vec_of_strings!["hello", "world", "rust"];
+    println!("Strings: {:?}", strings);
+
+    let map = hashmap!{
+        "name" => "John",
+        "age" => "30"
+    };
+    println!("Map: {:?}", map);
+
+    Ok(())
+}

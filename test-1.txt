@@ -1,0 +1,178 @@
+# Python Examples
+
+# Flask Web Application
+from flask import Flask, render_template, request, jsonify
+import sqlite3
+import os
+
+app = Flask(__name__)
+app.config['SECRET_KEY'] = 'your-secret-key-here'
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/api/users', methods=['GET', 'POST'])
+def users():
+    if request.method == 'GET':
+        conn = sqlite3.connect('users.db')
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM users')
+        users = cursor.fetchall()
+        conn.close()
+        return jsonify(users)
+    
+    elif request.method == 'POST':
+        data = request.get_json()
+        conn = sqlite3.connect('users.db')
+        cursor = conn.cursor()
+        cursor.execute('INSERT INTO users (name, email) VALUES (?, ?)',
+                      (data['name'], data['email']))
+        conn.commit()
+        conn.close()
+        return jsonify({'status': 'success'})
+
+# Data Processing Class
+class DataProcessor:
+    def __init__(self, data_source):
+        self.data_source = data_source
+        self.processed_data = []
+    
+    def load_data(self):
+        """Load data from source"""
+        try:
+            with open(self.data_source, 'r') as f:
+                return f.read().splitlines()
+        except FileNotFoundError:
+            print(f"File {self.data_source} not found")
+            return []
+    
+    def clean_data(self, data):
+        """Clean and validate data"""
+        cleaned = []
+        for item in data:
+            item = item.strip()
+            if item and not item.startswith('#'):
+                cleaned.append(item)
+        return cleaned
+    
+    def process(self):
+        """Main processing pipeline"""
+        raw_data = self.load_data()
+        cleaned_data = self.clean_data(raw_data)
+        
+        for item in cleaned_data:
+            processed_item = {
+                'original': item,
+                'length': len(item),
+                'words': len(item.split()),
+                'uppercase': item.upper(),
+                'lowercase': item.lower()
+            }
+            self.processed_data.append(processed_item)
+        
+        return self.processed_data
+
+# Algorithm Examples
+def quicksort(arr):
+    """Quicksort implementation"""
+    if len(arr) <= 1:
+        return arr
+    
+    pivot = arr[len(arr) // 2]
+    left = [x for x in arr if x < pivot]
+    middle = [x for x in arr if x == pivot]
+    right = [x for x in arr if x > pivot]
+    
+    return quicksort(left) + middle + quicksort(right)
+
+def binary_search(arr, target):
+    """Binary search implementation"""
+    left, right = 0, len(arr) - 1
+    
+    while left <= right:
+        mid = (left + right) // 2
+        if arr[mid] == target:
+            return mid
+        elif arr[mid] < target:
+            left = mid + 1
+        else:
+            right = mid - 1
+    
+    return -1
+
+def fibonacci(n):
+    """Fibonacci sequence generator"""
+    if n <= 1:
+        return n
+    
+    a, b = 0, 1
+    for _ in range(2, n + 1):
+        a, b = b, a + b
+    
+    return b
+
+# Decorator Examples
+def timing_decorator(func):
+    """Decorator to measure function execution time"""
+    import time
+    def wrapper(*args, **kwargs):
+        start = time.time()
+        result = func(*args, **kwargs)
+        end = time.time()
+        print(f"{func.__name__} took {end - start:.4f} seconds")
+        return result
+    return wrapper
+
+def retry_decorator(max_retries=3):
+    """Decorator to retry function on failure"""
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    if attempt == max_retries - 1:
+                        raise e
+                    print(f"Attempt {attempt + 1} failed: {e}")
+        return wrapper
+    return decorator
+
+# Context Manager Example
+class DatabaseConnection:
+    def __init__(self, db_path):
+        self.db_path = db_path
+        self.connection = None
+    
+    def __enter__(self):
+        self.connection = sqlite3.connect(self.db_path)
+        return self.connection
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.connection:
+            self.connection.close()
+
+# Usage examples
+if __name__ == '__main__':
+    # Test data processor
+    processor = DataProcessor('sample_data.txt')
+    results = processor.process()
+    print(f"Processed {len(results)} items")
+    
+    # Test algorithms
+    numbers = [64, 34, 25, 12, 22, 11, 90]
+    sorted_numbers = quicksort(numbers)
+    print(f"Sorted: {sorted_numbers}")
+    
+    index = binary_search(sorted_numbers, 25)
+    print(f"Found 25 at index: {index}")
+    
+    fib_result = fibonacci(10)
+    print(f"10th Fibonacci number: {fib_result}")
+    
+    # Test database context manager
+    with DatabaseConnection('test.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute('CREATE TABLE IF NOT EXISTS test (id INTEGER PRIMARY KEY, value TEXT)')
+        cursor.execute('INSERT INTO test (value) VALUES (?)', ('sample',))
+        conn.commit()

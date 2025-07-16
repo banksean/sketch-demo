@@ -1,0 +1,333 @@
+// JavaScript Examples
+
+// Express.js Server
+const express = require('express');
+const cors = require('cors');
+const bodyParser = require('body-parser');
+const mongoose = require('mongoose');
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Middleware
+app.use(cors());
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
+
+// MongoDB Connection
+mongoose.connect('mongodb://localhost:27017/testdb', {
+    useNewUrlParser: true,
+    useUnifiedTopology: true
+});
+
+// User Schema
+const userSchema = new mongoose.Schema({
+    name: { type: String, required: true },
+    email: { type: String, required: true, unique: true },
+    age: { type: Number, min: 0 },
+    createdAt: { type: Date, default: Date.now }
+});
+
+const User = mongoose.model('User', userSchema);
+
+// Routes
+app.get('/api/users', async (req, res) => {
+    try {
+        const users = await User.find();
+        res.json(users);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/users', async (req, res) => {
+    try {
+        const user = new User(req.body);
+        await user.save();
+        res.status(201).json(user);
+    } catch (error) {
+        res.status(400).json({ error: error.message });
+    }
+});
+
+app.put('/api/users/:id', async (req, res) => {
+    try {
+        const user = await User.findByIdAndUpdate(req.params.id, req.body, { new: true });
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        res.json(user);
+    } catch (error) {
+        res.status(400).json({ error: error.message });
+    }
+});
+
+app.delete('/api/users/:id', async (req, res) => {
+    try {
+        const user = await User.findByIdAndDelete(req.params.id);
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        res.json({ message: 'User deleted successfully' });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Data Structures and Algorithms
+class Node {
+    constructor(data) {
+        this.data = data;
+        this.next = null;
+    }
+}
+
+class LinkedList {
+    constructor() {
+        this.head = null;
+        this.size = 0;
+    }
+    
+    append(data) {
+        const newNode = new Node(data);
+        if (!this.head) {
+            this.head = newNode;
+        } else {
+            let current = this.head;
+            while (current.next) {
+                current = current.next;
+            }
+            current.next = newNode;
+        }
+        this.size++;
+    }
+    
+    prepend(data) {
+        const newNode = new Node(data);
+        newNode.next = this.head;
+        this.head = newNode;
+        this.size++;
+    }
+    
+    remove(data) {
+        if (!this.head) return false;
+        
+        if (this.head.data === data) {
+            this.head = this.head.next;
+            this.size--;
+            return true;
+        }
+        
+        let current = this.head;
+        while (current.next && current.next.data !== data) {
+            current = current.next;
+        }
+        
+        if (current.next) {
+            current.next = current.next.next;
+            this.size--;
+            return true;
+        }
+        
+        return false;
+    }
+    
+    find(data) {
+        let current = this.head;
+        let index = 0;
+        while (current) {
+            if (current.data === data) {
+                return index;
+            }
+            current = current.next;
+            index++;
+        }
+        return -1;
+    }
+    
+    toArray() {
+        const result = [];
+        let current = this.head;
+        while (current) {
+            result.push(current.data);
+            current = current.next;
+        }
+        return result;
+    }
+}
+
+// Binary Search Tree
+class BSTNode {
+    constructor(value) {
+        this.value = value;
+        this.left = null;
+        this.right = null;
+    }
+}
+
+class BinarySearchTree {
+    constructor() {
+        this.root = null;
+    }
+    
+    insert(value) {
+        this.root = this._insertNode(this.root, value);
+    }
+    
+    _insertNode(node, value) {
+        if (node === null) {
+            return new BSTNode(value);
+        }
+        
+        if (value < node.value) {
+            node.left = this._insertNode(node.left, value);
+        } else if (value > node.value) {
+            node.right = this._insertNode(node.right, value);
+        }
+        
+        return node;
+    }
+    
+    search(value) {
+        return this._searchNode(this.root, value);
+    }
+    
+    _searchNode(node, value) {
+        if (node === null || node.value === value) {
+            return node;
+        }
+        
+        if (value < node.value) {
+            return this._searchNode(node.left, value);
+        } else {
+            return this._searchNode(node.right, value);
+        }
+    }
+    
+    inorderTraversal() {
+        const result = [];
+        this._inorder(this.root, result);
+        return result;
+    }
+    
+    _inorder(node, result) {
+        if (node !== null) {
+            this._inorder(node.left, result);
+            result.push(node.value);
+            this._inorder(node.right, result);
+        }
+    }
+}
+
+// Utility Functions
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+function throttle(func, limit) {
+    let inThrottle;
+    return function() {
+        const args = arguments;
+        const context = this;
+        if (!inThrottle) {
+            func.apply(context, args);
+            inThrottle = true;
+            setTimeout(() => inThrottle = false, limit);
+        }
+    };
+}
+
+function memoize(fn) {
+    const cache = {};
+    return function(...args) {
+        const key = JSON.stringify(args);
+        if (key in cache) {
+            return cache[key];
+        }
+        const result = fn.apply(this, args);
+        cache[key] = result;
+        return result;
+    };
+}
+
+// Promise-based HTTP client
+class HttpClient {
+    constructor(baseURL) {
+        this.baseURL = baseURL;
+        this.headers = {
+            'Content-Type': 'application/json'
+        };
+    }
+    
+    async get(endpoint) {
+        const response = await fetch(`${this.baseURL}${endpoint}`, {
+            method: 'GET',
+            headers: this.headers
+        });
+        return this._handleResponse(response);
+    }
+    
+    async post(endpoint, data) {
+        const response = await fetch(`${this.baseURL}${endpoint}`, {
+            method: 'POST',
+            headers: this.headers,
+            body: JSON.stringify(data)
+        });
+        return this._handleResponse(response);
+    }
+    
+    async put(endpoint, data) {
+        const response = await fetch(`${this.baseURL}${endpoint}`, {
+            method: 'PUT',
+            headers: this.headers,
+            body: JSON.stringify(data)
+        });
+        return this._handleResponse(response);
+    }
+    
+    async delete(endpoint) {
+        const response = await fetch(`${this.baseURL}${endpoint}`, {
+            method: 'DELETE',
+            headers: this.headers
+        });
+        return this._handleResponse(response);
+    }
+    
+    async _handleResponse(response) {
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return await response.json();
+    }
+}
+
+// Start server
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+});
+
+// Example usage
+const list = new LinkedList();
+list.append(1);
+list.append(2);
+list.append(3);
+console.log('Linked List:', list.toArray());
+
+const bst = new BinarySearchTree();
+bst.insert(5);
+bst.insert(3);
+bst.insert(7);
+bst.insert(1);
+bst.insert(9);
+console.log('BST Inorder:', bst.inorderTraversal());
+
+const apiClient = new HttpClient('https://api.example.com');
+// apiClient.get('/users').then(users => console.log(users));
