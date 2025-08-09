@@ -1,0 +1,4 @@
+[submodule "vendor/LinearDesign"]
+	path = vendor/LinearDesign
+	url = https://github.com/LinearDesignSoftware/LinearDesign
+	branch = main
