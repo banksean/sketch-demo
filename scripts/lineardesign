@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Simple wrapper to build and run LinearDesign on arm64 hosts by
+# cross-compiling x86_64 and executing via qemu-x86_64.
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+LD_DIR="${REPO_ROOT}/vendor/LinearDesign"
+BIN="${LD_DIR}/bin/LinearDesign_2D"
+
+usage() {
+  cat <<EOF
+Usage: echo SEQUENCE | scripts/lineardesign [OPTIONS]
+
+Options:
+  -l, --lambda LAMBDA       Set lambda (default: 0.0)
+  -v, --verbose             Verbose output
+  -c, --codonusage FILE     Codon usage CSV (default: codon_usage_freq_table_human.csv)
+  -h, --help                Show this help
+
+Notes:
+- Requires packages: qemu-user-static, x86_64-linux-gnu-g++
+- Builds vendor/LinearDesign/bin/LinearDesign_2D if missing
+- Runs the x86_64 binary under qemu on arm64
+EOF
+}
+
+lambda="0.0"
+verbose=0
+codon="codon_usage_freq_table_human.csv"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -l|--lambda)
+      [[ $# -ge 2 ]] || { echo "Missing value for $1" >&2; exit 2; }
+      lambda="$2"; shift 2;;
+    -v|--verbose)
+      verbose=1; shift;;
+    -c|--codonusage)
+      [[ $# -ge 2 ]] || { echo "Missing value for $1" >&2; exit 2; }
+      codon="$2"; shift 2;;
+    -h|--help)
+      usage; exit 0;;
+    *)
+      echo "Unknown argument: $1" >&2; usage; exit 2;;
+  esac
+done
+
+ensure_submodule() {
+  if [[ ! -d "${LD_DIR}/src" ]]; then
+    echo "Initializing submodule vendor/LinearDesign..."
+    git -C "${REPO_ROOT}" submodule update --init --recursive
+  fi
+}
+
+build_if_needed() {
+  if [[ -x "${BIN}" ]]; then
+    return
+  fi
+  if ! command -v x86_64-linux-gnu-g++ >/dev/null 2>&1; then
+    echo "Missing x86_64-linux-gnu-g++. Please install cross toolchain (e.g., sudo apt-get install g++-x86-64-linux-gnu)." >&2
+    exit 1
+  fi
+  echo "Building LinearDesign (x86_64) ..."
+  make -C "${LD_DIR}" CXX=x86_64-linux-gnu-g++ -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
+}
+
+run() {
+  if ! command -v qemu-x86_64 >/dev/null 2>&1; then
+    echo "Missing qemu-x86_64. Please install qemu-user-static." >&2
+    exit 1
+  fi
+  pushd "${LD_DIR}" >/dev/null
+  # codon path: if absolute, use as-is; else assume relative to LD_DIR
+  local codon_arg
+  if [[ "${codon}" = /* ]]; then
+    codon_arg="${codon}"
+  else
+    codon_arg="${codon}"
+  fi
+  # Execute the binary with stdin forwarded
+  qemu-x86_64 -L /usr/x86_64-linux-gnu "${BIN}" "${lambda}" "${verbose}" "${codon_arg}"
+  popd >/dev/null
+}
+
+ensure_submodule
+build_if_needed
+run
