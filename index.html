@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DNA → RNA Transcription Demo</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>How DNA turns into RNA (Transcription)</h1>
+    <p class="subtitle">Interactive visualization of RNA polymerase reading the DNA template (3′→5′) and synthesizing RNA (5′→3′).</p>
+  </header>
+
+  <main>
+    <section class="controls">
+      <div class="input-group">
+        <label for="dna-input">DNA sequence</label>
+        <textarea id="dna-input" placeholder="Enter A C G T (spaces/newlines ok). Example: ATGCGTACGTTAA" rows="3"></textarea>
+        <div class="hints">
+          • Only A, C, G, T are used. • Max ~300 bases.
+        </div>
+      </div>
+
+      <div class="options">
+        <fieldset>
+          <legend>What strand did you enter?</legend>
+          <label><input type="radio" name="strandType" value="template" checked /> Template (non‑coding)</label>
+          <label><input type="radio" name="strandType" value="coding" /> Coding (same as RNA except T↔U)</label>
+        </fieldset>
+        <fieldset>
+          <legend>Orientation of the sequence as written</legend>
+          <label><input type="radio" name="orientation" value="5to3" checked /> 5′ → 3′</label>
+          <label><input type="radio" name="orientation" value="3to5" /> 3′ → 5′</label>
+        </fieldset>
+      </div>
+
+      <div class="buttons">
+        <button id="btn-example">Load example</button>
+        <button id="btn-validate">Validate</button>
+        <button id="btn-reset">Reset</button>
+      </div>
+
+      <div class="playback">
+        <button id="btn-step" disabled>Step</button>
+        <button id="btn-play" disabled>Play</button>
+        <button id="btn-pause" disabled>Pause</button>
+        <label class="speed">Speed <input id="speed" type="range" min="50" max="1000" step="50" value="300" /> <span id="speedLabel">300 ms/base</span></label>
+      </div>
+
+      <div id="messages" role="status" aria-live="polite"></div>
+    </section>
+
+    <section class="viz">
+      <div class="strand-labels">
+        <div>Template DNA (3′→5′)</div>
+        <div>Coding DNA (5′→3′)</div>
+        <div>mRNA product (5′→3′)</div>
+      </div>
+      <div id="template" class="lane"></div>
+      <div id="coding" class="lane"></div>
+      <div id="mrna" class="lane"></div>
+      <div id="polymerase" class="pol"></div>
+    </section>
+
+    <section class="explain">
+      <h2>What’s happening?</h2>
+      <ul>
+        <li>RNA polymerase moves along the template DNA strand in the 3′→5′ direction.</li>
+        <li>It builds RNA in the 5′→3′ direction using base pairing rules: A↔U and C↔G (T in DNA pairs with A in RNA).</li>
+        <li>The coding DNA strand matches the RNA sequence except thymine (T) is replaced by uracil (U).</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    <small>Educational demo. Not modeling promoters or termination; focuses on base pairing and strand orientation.</small>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
