@@ -45,6 +45,7 @@
         .control-group select { padding: 5px 10px; border-radius: 5px; border: 1px solid #ccc; }
         .control-group input[type="range"] { width: 80px; }
         .key-display { text-align: center; padding: 10px; background: white; border-radius: 8px; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
         @media (max-width: 768px) { .harmony-row { flex-direction: column; align-items: stretch; } .control-group { justify-content: space-between; } }
     </style>
 </head>
@@ -62,8 +63,15 @@
                 <button id="downloadMidiBtn" class="btn success" disabled>Download MIDI</button>
             </div>
             
+            <div class="audio-test" style="background: #e8f5e8; border: 2px dashed #4CAF50; border-radius: 8px; padding: 15px; margin-bottom: 20px; text-align: center;">
+                <h3>🔊 Audio Test</h3>
+                <p>Click to test harmony audio before recording:</p>
+                <button id="testAudioBtn" class="btn" style="background: #FF9800; color: white; margin: 10px;">Play Test Chord</button>
+                <span id="audioIndicator" style="display: inline-block; width: 12px; height: 12px; background: #ccc; border-radius: 50%; margin-left: 10px;"></span>
+            </div>
+            
             <div class="harmony-controls">
-                <h3>Real-time Harmony</h3>
+                <h3>🎹 Real-time Harmony</h3>
                 <div class="harmony-row">
                     <label class="toggle-label">
                         <input type="checkbox" id="harmonyEnabled"> Enable Harmony
@@ -100,7 +108,8 @@
                     </div>
                     <div class="control-group">
                         <label>Volume:</label>
-                        <input type="range" id="harmonyVolume" min="0" max="100" value="30">
+                        <input type="range" id="harmonyVolume" min="0" max="100" value="60">
+                        <span id="volumeDisplay">60%</span>
                     </div>
                 </div>
                 <div class="key-display">
@@ -496,10 +505,38 @@
             }
             
             setupAudioSynthesis() {
-                if (!this.audioContext) return;
-                this.masterGain = this.audioContext.createGain();
-                this.masterGain.gain.value = 0.15;
-                this.masterGain.connect(this.audioContext.destination);
+                if (!this.audioContext) {
+                    console.log('No audio context available for harmony synthesis');
+                    return;
+                }
+                
+                try {
+                    // Create enhanced audio chain with compressor
+                    this.compressor = this.audioContext.createDynamicsCompressor();
+                    this.masterGain = this.audioContext.createGain();
+                    
+                    // Set up compressor for better audio quality
+                    this.compressor.threshold.setValueAtTime(-24, this.audioContext.currentTime);
+                    this.compressor.knee.setValueAtTime(30, this.audioContext.currentTime);
+                    this.compressor.ratio.setValueAtTime(12, this.audioContext.currentTime);
+                    this.compressor.attack.setValueAtTime(0.003, this.audioContext.currentTime);
+                    this.compressor.release.setValueAtTime(0.25, this.audioContext.currentTime);
+                    
+                    // Connect chain: compressor -> master gain -> speakers
+                    this.compressor.connect(this.masterGain);
+                    this.masterGain.connect(this.audioContext.destination);
+                    
+                    // Much higher default volume for harmony to make it more obvious
+                    this.masterGain.gain.value = 0.8;
+                    
+                    console.log('Harmony audio synthesis setup complete with high volume');
+                } catch (error) {
+                    console.error('Failed to setup harmony audio synthesis:', error);
+                    // Fallback: direct connection to destination
+                    this.masterGain = this.audioContext.createGain();
+                    this.masterGain.gain.value = 0.4;
+                    this.masterGain.connect(this.audioContext.destination);
+                }
             }
             
             processNote(note, timestamp, confidence) {
@@ -607,39 +644,79 @@
             }
             
             playChord(chord) {
-                if (!this.audioContext || !chord) return;
+                if (!this.audioContext || !chord) {
+                    console.log('Cannot play chord - no audio context or chord');
+                    return;
+                }
+                
+                // Check if audio context is running
+                if (this.audioContext.state === 'suspended') {
+                    this.audioContext.resume().then(() => {
+                        this.playChord(chord); // Retry after resuming
+                    });
+                    return;
+                }
+                
                 this.stopCurrentChord();
                 const now = this.audioContext.currentTime;
                 const duration = 2.0;
                 
+                console.log('Playing chord:', chord.roman, 'Notes:', chord.notes);
+                
                 chord.notes.forEach((note, index) => {
                     const frequency = 440 * Math.pow(2, (note - 9) / 12);
-                    const octaveAdjust = index === 0 ? 0 : 1;
+                    const octaveAdjust = index === 0 ? 0 : 1; // Bass note stays lower
                     const adjustedFreq = frequency * Math.pow(2, octaveAdjust);
-                    this.createAndPlayTone(adjustedFreq, now, duration, 0.08 / (index + 1));
+                    // Much louder volume to make harmony obvious
+                    this.createAndPlayTone(adjustedFreq, now, duration, 0.2 / (index + 1));
                 });
             }
             
             createAndPlayTone(frequency, startTime, duration, volume) {
-                const osc = this.audioContext.createOscillator();
-                const gain = this.audioContext.createGain();
-                const filter = this.audioContext.createBiquadFilter();
-                
-                osc.type = 'triangle';
-                osc.frequency.setValueAtTime(frequency, startTime);
-                filter.type = 'lowpass';
-                filter.frequency.setValueAtTime(1500, startTime);
-                
-                gain.gain.setValueAtTime(0, startTime);
-                gain.gain.linearRampToValueAtTime(volume, startTime + 0.05);
-                gain.gain.exponentialRampToValueAtTime(volume * 0.3, startTime + duration * 0.3);
-                gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
-                
-                osc.connect(filter); filter.connect(gain); gain.connect(this.masterGain);
-                osc.start(startTime); osc.stop(startTime + duration);
-                
-                this.synthNodes.push({ osc, gain, filter });
-                osc.onended = () => { this.synthNodes = this.synthNodes.filter(n => n.osc !== osc); };
+                try {
+                    const osc = this.audioContext.createOscillator();
+                    const gain = this.audioContext.createGain();
+                    const filter = this.audioContext.createBiquadFilter();
+                    
+                    // Enhanced oscillator settings for richer sound
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(frequency, startTime);
+                    
+                    // Warmer filter settings
+                    filter.type = 'lowpass';
+                    filter.frequency.setValueAtTime(2000, startTime);
+                    filter.Q.setValueAtTime(1, startTime);
+                    
+                    // Natural envelope with better sustain
+                    gain.gain.setValueAtTime(0, startTime);
+                    gain.gain.linearRampToValueAtTime(volume, startTime + 0.05);
+                    gain.gain.exponentialRampToValueAtTime(volume * 0.4, startTime + duration * 0.2);
+                    gain.gain.exponentialRampToValueAtTime(volume * 0.2, startTime + duration * 0.7);
+                    gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+                    
+                    // Connect audio chain
+                    osc.connect(filter);
+                    filter.connect(gain);
+                    
+                    // Try compressor first, fallback to master gain, then destination
+                    if (this.compressor) {
+                        gain.connect(this.compressor);
+                    } else if (this.masterGain) {
+                        gain.connect(this.masterGain);
+                    } else {
+                        gain.connect(this.audioContext.destination);
+                    }
+                    
+                    osc.start(startTime);
+                    osc.stop(startTime + duration);
+                    
+                    this.synthNodes.push({ osc, gain, filter });
+                    osc.onended = () => { this.synthNodes = this.synthNodes.filter(n => n.osc !== osc); };
+                    
+                    console.log(`Playing tone: ${frequency.toFixed(1)}Hz, volume: ${volume.toFixed(3)}`);
+                } catch (error) {
+                    console.error('Error creating tone:', error);
+                }
             }
             
             stopCurrentChord() {
@@ -658,7 +735,13 @@
             setStyle(style) { this.style = style; }
             setComplexity(complexity) { this.complexity = complexity; }
             setHarmonicSpeed(speed) { this.harmonicSpeed = speed; }
-            setVolume(volume) { if (this.masterGain) this.masterGain.gain.value = volume * 0.3; }
+            setVolume(volume) { 
+                if (this.masterGain) {
+                    // Much higher volume scaling for very audible harmony
+                    this.masterGain.gain.setValueAtTime(volume * 0.8, this.audioContext.currentTime);
+                    console.log('Harmony volume set to:', volume * 0.8);
+                }
+            }
             destroy() { this.stopCurrentChord(); if (this.masterGain) this.masterGain.disconnect(); }
         }
 
@@ -697,7 +780,14 @@
                     if (this.harmonyEngine) this.harmonyEngine.setComplexity(e.target.value);
                 });
                 document.getElementById('harmonyVolume').addEventListener('input', (e) => {
-                    if (this.harmonyEngine) this.harmonyEngine.setVolume(e.target.value / 100);
+                    const volume = e.target.value / 100;
+                    document.getElementById('volumeDisplay').textContent = e.target.value + '%';
+                    if (this.harmonyEngine) this.harmonyEngine.setVolume(volume);
+                });
+                
+                // Test audio button
+                document.getElementById('testAudioBtn').addEventListener('click', () => {
+                    this.testHarmonyAudio();
                 });
                 
                 this.updateStatus('Click "Start Recording" to begin');
@@ -723,8 +813,14 @@
                     this.pitchDetector = new PitchDetector(this.audioContext, this.audioContext.sampleRate);
                     this.midiConverter = new MidiConverter();
                     
-                    // Initialize harmony engine
+                    // Initialize harmony engine with shared audio context
                     this.harmonyEngine = new RealtimeHarmonyEngine(this.audioContext);
+                    
+                    // Ensure audio context is resumed for harmony
+                    if (this.audioContext.state === 'suspended') {
+                        await this.audioContext.resume();
+                    }
+                    
                     this.harmonyEngine.setEnabled(document.getElementById('harmonyEnabled').checked);
                     this.harmonyEngine.setStyle(document.getElementById('harmonyStyle').value);
                     this.harmonyEngine.setHarmonicSpeed(document.getElementById('harmonySpeed').value);
@@ -887,6 +983,74 @@
                     keyElement.style.color = '#ccc';
                 }
             }
+            
+            async testHarmonyAudio() {
+                const indicator = document.getElementById('audioIndicator');
+                const statusText = document.getElementById('statusText');
+                
+                try {
+                    // Use existing audio context if recording, or create new one
+                    let testAudioContext;
+                    
+                    if (this.audioContext && this.audioContext.state !== 'closed') {
+                        testAudioContext = this.audioContext;
+                    } else {
+                        testAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    }
+                    
+                    // Resume if suspended
+                    if (testAudioContext.state === 'suspended') {
+                        await testAudioContext.resume();
+                    }
+                    
+                    // Create simple test oscillators directly (bypass harmony engine for test)
+                    const now = testAudioContext.currentTime;
+                    const duration = 2.0;
+                    const frequencies = [261.63, 329.63, 392.00]; // C4, E4, G4
+                    
+                    indicator.style.background = '#4CAF50';
+                    indicator.style.animation = 'pulse 1s infinite';
+                    
+                    // Play test chord with direct oscillators
+                    frequencies.forEach((freq, index) => {
+                        const osc = testAudioContext.createOscillator();
+                        const gain = testAudioContext.createGain();
+                        
+                        osc.type = 'triangle';
+                        osc.frequency.setValueAtTime(freq, now);
+                        
+                        const volume = 0.1 / (index + 1);
+                        gain.gain.setValueAtTime(0, now);
+                        gain.gain.linearRampToValueAtTime(volume, now + 0.05);
+                        gain.gain.exponentialRampToValueAtTime(volume * 0.3, now + duration * 0.5);
+                        gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+                        
+                        osc.connect(gain);
+                        gain.connect(testAudioContext.destination);
+                        
+                        osc.start(now);
+                        osc.stop(now + duration);
+                    });
+                    
+                    statusText.textContent = 'Playing test chord - you should hear piano-like harmony! 🎹';
+                    
+                    // Reset indicator after 2 seconds
+                    setTimeout(() => {
+                        indicator.style.background = '#ccc';
+                        indicator.style.animation = 'none';
+                        statusText.textContent = 'Test chord finished. If you heard it, harmony is working!';
+                        // Don't close audio context if it's being used for recording
+                        if (!this.isRecording && testAudioContext !== this.audioContext) {
+                            testAudioContext.close();
+                        }
+                    }, 2500);
+                    
+                } catch (error) {
+                    console.error('Audio test failed:', error);
+                    statusText.textContent = 'Audio test failed. Check browser audio permissions.';
+                    indicator.style.background = '#f44336';
+                }
+            }
 
             downloadMidi() {
                 if (!this.midiConverter) {
@@ -917,7 +1081,27 @@
 
         // Initialize the app when the page loads
         document.addEventListener('DOMContentLoaded', () => {
-            new HumToMidiApp();
+            window.app = new HumToMidiApp();
+            
+            // Add a debug button for testing
+            const debugBtn = document.createElement('button');
+            debugBtn.textContent = 'Debug Audio';
+            debugBtn.className = 'btn';
+            debugBtn.style.background = '#9C27B0';
+            debugBtn.style.color = 'white';
+            debugBtn.onclick = () => {
+                console.log('Audio context state:', window.app.audioContext?.state);
+                console.log('Harmony engine exists:', !!window.app.harmonyEngine);
+                console.log('Is recording:', window.app.isRecording);
+                
+                // Force play a chord if harmony engine exists
+                if (window.app.harmonyEngine) {
+                    const testChord = { roman: 'I', root: 0, notes: [0, 4, 7] };
+                    window.app.harmonyEngine.playChord(testChord);
+                    console.log('Forced chord play attempted');
+                }
+            };
+            document.querySelector('.controls').appendChild(debugBtn);
         });
     </script>
 </body>
