@@ -20,13 +20,18 @@ A web application that captures audio from your microphone, detects the pitch an
 
 ## Usage
 
-1. Open `index.html` in a web browser (requires HTTPS or localhost for microphone access)
+**Option 1 - Self-contained version (recommended):**
+1. Open `hum-to-midi.html` in a web browser (requires HTTPS or localhost for microphone access)
 2. Click "Start Recording"
 3. Allow microphone permission when prompted
 4. Hum a melody into your microphone
-5. Watch the real-time pitch detection and note visualization
+5. Watch the real-time pitch detection
 6. Click "Stop Recording" when finished
 7. Click "Download MIDI" to save your melody as a MIDI file
+
+**Option 2 - Multi-file version:**
+1. Open `index.html` in a web browser
+2. Follow the same steps as above
 
 ## Technical Details
 
