@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hum to MIDI Converter</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Hum to MIDI Converter</h1>
+            <p>Hum into your microphone and watch it convert to musical notation!</p>
+        </header>
+        
+        <main>
+            <div class="controls">
+                <button id="startBtn" class="btn primary">Start Recording</button>
+                <button id="stopBtn" class="btn secondary" disabled>Stop Recording</button>
+                <button id="clearBtn" class="btn secondary">Clear</button>
+                <button id="downloadMidiBtn" class="btn success" disabled>Download MIDI</button>
+            </div>
+            
+            <div class="status">
+                <div id="statusText">Click "Start Recording" to begin</div>
+                <div class="audio-level">
+                    <div id="audioLevelBar" class="level-bar"></div>
+                </div>
+            </div>
+            
+            <div class="pitch-display">
+                <div class="current-note">
+                    <span class="label">Current Note:</span>
+                    <span id="currentNote" class="note-value">-</span>
+                    <span id="currentFreq" class="freq-value">- Hz</span>
+                </div>
+                <canvas id="pitchCanvas" width="800" height="200"></canvas>
+            </div>
+            
+            <div class="detected-notes">
+                <h3>Detected Notes</h3>
+                <div id="notesList" class="notes-list"></div>
+            </div>
+        </main>
+    </div>
+    
+    <script src="simple-midi.js"></script>
+    <script src="pitch-detector.js"></script>
+    <script src="midi-converter.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
